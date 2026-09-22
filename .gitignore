@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+vendor/
+
+# wp-env
+.wp-env/
+.wp-env.override.json
+
+# WordPress core content (keep only this plugin if a local wp-content tree exists)
+/wp-content/*
+!/wp-content/plugins/
+/wp-content/plugins/*
+!/wp-content/plugins/bp-tracker/
+
+# Build output
+frontend/dist/
+
+# Test and tooling artifacts
+coverage/
+.phpunit.result.cache
+.phpcs-cache
+.eslintcache
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
