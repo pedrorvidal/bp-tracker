@@ -24,6 +24,10 @@ define( 'BP_TRACKER_FILE', __FILE__ );
 define( 'BP_TRACKER_DIR', plugin_dir_path( __FILE__ ) );
 define( 'BP_TRACKER_URL', plugin_dir_url( __FILE__ ) );
 
+if ( file_exists( BP_TRACKER_DIR . 'vendor/autoload.php' ) ) {
+	require_once BP_TRACKER_DIR . 'vendor/autoload.php';
+}
+
 /**
  * Loads every PHP file under includes/.
  */

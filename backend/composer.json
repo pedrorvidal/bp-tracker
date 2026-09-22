@@ -4,7 +4,8 @@
 	"type": "wordpress-plugin",
 	"license": "GPL-2.0-or-later",
 	"require": {
-		"php": ">=8.2"
+		"php": ">=8.2",
+		"firebase/php-jwt": "^7.0"
 	},
 	"require-dev": {
 		"phpstan/phpstan": "^2.0",

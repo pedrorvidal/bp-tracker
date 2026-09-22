@@ -16,11 +16,21 @@ if ( ! $bp_tracker_tests_dir ) {
 
 require_once $bp_tracker_tests_dir . '/includes/functions.php';
 
+if ( ! defined( 'BP_TRACKER_JWT_SECRET' ) ) {
+	define( 'BP_TRACKER_JWT_SECRET', 'test-secret-do-not-use-in-production' );
+}
+
+if ( ! defined( 'BP_TRACKER_FRONTEND_ORIGIN' ) ) {
+	define( 'BP_TRACKER_FRONTEND_ORIGIN', 'http://localhost:3000' );
+}
+
 /**
- * Manually loads the plugin under test.
+ * Manually loads the plugin under test, including its DB schema.
  */
 function bp_tracker_tests_load_plugin(): void {
 	require dirname( __DIR__ ) . '/bp-tracker.php';
+
+	BP_Tracker_JWT_Auth::create_tables();
 }
 tests_add_filter( 'muplugins_loaded', 'bp_tracker_tests_load_plugin' );
 
