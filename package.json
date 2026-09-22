@@ -1,0 +1,13 @@
+{
+	"name": "bp-tracker",
+	"private": true,
+	"description": "BP Tracker monorepo (WordPress plugin backend + Vite/React frontend).",
+	"scripts": {
+		"wp-env:start": "wp-env start",
+		"wp-env:stop": "wp-env stop",
+		"wp-env:destroy": "wp-env destroy"
+	},
+	"devDependencies": {
+		"@wordpress/env": "^11.15.0"
+	}
+}

@@ -1,0 +1,21 @@
+{
+	"phpVersion": "8.2",
+	"mappings": {
+		"wp-content/plugins/bp-tracker": "./backend"
+	},
+	"config": {
+		"WP_DEBUG": true,
+		"WP_DEBUG_LOG": true,
+		"SCRIPT_DEBUG": true
+	},
+	"env": {
+		"tests": {
+			"mappings": {
+				"wp-content/plugins/bp-tracker": "./backend"
+			}
+		}
+	},
+	"lifecycleScripts": {
+		"afterStart": "wp-env run cli wp plugin activate bp-tracker && wp-env run tests-cli wp plugin activate bp-tracker"
+	}
+}
