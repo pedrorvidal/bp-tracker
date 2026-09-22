@@ -74,40 +74,39 @@ class BP_Tracker_CPT {
 		add_action( 'save_post_' . self::POST_TYPE, array( __CLASS__, 'set_reading_title' ), 10, 3 );
 		add_filter( 'add_post_metadata', array( __CLASS__, 'validate_meta' ), 10, 5 );
 		add_filter( 'update_post_metadata', array( __CLASS__, 'validate_meta' ), 10, 5 );
-		add_filter( 'rest_' . self::POST_TYPE . '_query', array( __CLASS__, 'scope_query_to_current_user' ), 10, 2 );
 	}
 
 	/**
 	 * Registers the "bp_reading" post type.
 	 *
-	 * Not public: it exists only to be managed through the REST API by the
-	 * plugin's own frontend, not queried or indexed like ordinary content.
+	 * Not public, and not exposed to the default wp/v2 REST controller
+	 * (show_in_rest is false): all access goes through the plugin's own
+	 * BP_Tracker_REST_Controller (bp-tracker/v1/readings), which enforces
+	 * ownership on every route.
 	 */
 	public static function register_post_type(): void {
 		register_post_type(
 			self::POST_TYPE,
 			array(
-				'labels'                => array(
+				'labels'              => array(
 					'name'          => __( 'Readings', 'bp-tracker' ),
 					'singular_name' => __( 'Reading', 'bp-tracker' ),
 				),
-				'public'                => false,
-				'show_ui'               => true,
-				'show_in_menu'          => true,
-				'show_in_rest'          => true,
-				'rest_base'             => 'bp-readings',
-				'rest_controller_class' => 'BP_Tracker_Readings_Controller',
-				'supports'              => array( 'title', 'custom-fields' ),
-				'capability_type'       => 'post',
-				'map_meta_cap'          => true,
-				'hierarchical'          => false,
-				'has_archive'           => false,
-				'rewrite'               => false,
-				'query_var'             => false,
-				'publicly_queryable'    => false,
-				'exclude_from_search'   => true,
-				'show_in_nav_menus'     => false,
-				'show_in_admin_bar'     => false,
+				'public'              => false,
+				'show_ui'             => true,
+				'show_in_menu'        => true,
+				'show_in_rest'        => false,
+				'supports'            => array( 'title', 'custom-fields' ),
+				'capability_type'     => 'post',
+				'map_meta_cap'        => true,
+				'hierarchical'        => false,
+				'has_archive'         => false,
+				'rewrite'             => false,
+				'query_var'           => false,
+				'publicly_queryable'  => false,
+				'exclude_from_search' => true,
+				'show_in_nav_menus'   => false,
+				'show_in_admin_bar'   => false,
 			)
 		);
 	}
@@ -333,20 +332,6 @@ class BP_Tracker_CPT {
 			)
 		);
 		add_action( 'save_post_' . self::POST_TYPE, array( __CLASS__, 'set_reading_title' ), 10, 3 );
-	}
-
-	/**
-	 * Restricts the REST collection query to the current user's own readings.
-	 *
-	 * @param array<string, mixed> $args    WP_Query args.
-	 * @param WP_REST_Request      $request Current request.
-	 * @return array<string, mixed>
-	 */
-	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- signature must match the "rest_{$post_type}_query" filter.
-	public static function scope_query_to_current_user( array $args, WP_REST_Request $request ): array {
-		$args['author'] = get_current_user_id();
-
-		return $args;
 	}
 }
 

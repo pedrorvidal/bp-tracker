@@ -26,11 +26,10 @@ class BP_Tracker_CPT_Test extends WP_UnitTestCase {
 	/**
 	 * Creates a reading post with the given meta already attached.
 	 *
-	 * @param array $meta      Meta key/value pairs.
-	 * @param array $post_args Extra WP_Query-style post args (e.g. post_author).
+	 * @param array $meta Meta key/value pairs.
 	 * @return int Post ID.
 	 */
-	private function create_reading( array $meta = array(), array $post_args = array() ): int {
+	private function create_reading( array $meta = array() ): int {
 		$defaults = array(
 			'reading_datetime' => '2026-09-22T08:30:00+00:00',
 			'systolic'         => 120,
@@ -38,18 +37,19 @@ class BP_Tracker_CPT_Test extends WP_UnitTestCase {
 		);
 
 		return self::factory()->post->create(
-			array_merge(
-				array(
-					'post_type'  => BP_Tracker_CPT::POST_TYPE,
-					'meta_input' => array_merge( $defaults, $meta ),
-				),
-				$post_args
+			array(
+				'post_type'  => BP_Tracker_CPT::POST_TYPE,
+				'meta_input' => array_merge( $defaults, $meta ),
 			)
 		);
 	}
 
 	/**
-	 * The post type is registered with the expected visibility and REST wiring.
+	 * The post type is registered with the expected visibility.
+	 *
+	 * Not exposed to the default wp/v2 REST controller -- access goes
+	 * through BP_Tracker_REST_Controller instead, which enforces
+	 * ownership; see BP_Tracker_REST_Controller_Test.
 	 */
 	public function test_post_type_is_registered_correctly(): void {
 		$this->assertTrue( post_type_exists( BP_Tracker_CPT::POST_TYPE ) );
@@ -59,8 +59,7 @@ class BP_Tracker_CPT_Test extends WP_UnitTestCase {
 		$this->assertNotNull( $post_type );
 		$this->assertFalse( $post_type->public );
 		$this->assertFalse( $post_type->publicly_queryable );
-		$this->assertTrue( $post_type->show_in_rest );
-		$this->assertSame( 'bp-readings', $post_type->rest_base );
+		$this->assertFalse( $post_type->show_in_rest );
 	}
 
 	/**
@@ -158,110 +157,5 @@ class BP_Tracker_CPT_Test extends WP_UnitTestCase {
 		$post = get_post( $post_id );
 
 		$this->assertSame( '2026-09-22T08:30:00+00:00 — 118x76', $post->post_title );
-	}
-
-	/**
-	 * Reading meta is exposed through the CPT's REST endpoint, to its own author.
-	 */
-	public function test_meta_appears_in_rest_api(): void {
-		$user_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
-		wp_set_current_user( $user_id );
-
-		$post_id = $this->create_reading(
-			array(
-				'reading_datetime' => '2026-09-22T08:30:00+00:00',
-				'systolic'         => 130,
-				'diastolic'        => 85,
-				'pulse'            => 72,
-			),
-			array( 'post_author' => $user_id )
-		);
-
-		$request  = new WP_REST_Request( 'GET', '/wp/v2/bp-readings/' . $post_id );
-		$response = rest_get_server()->dispatch( $request );
-		$data     = $response->get_data();
-
-		$this->assertSame( 200, $response->get_status() );
-		$this->assertArrayHasKey( 'meta', $data );
-		$this->assertSame( '2026-09-22T08:30:00+00:00', $data['meta']['reading_datetime'] );
-		$this->assertSame( 130, $data['meta']['systolic'] );
-		$this->assertSame( 85, $data['meta']['diastolic'] );
-		$this->assertSame( 72, $data['meta']['pulse'] );
-	}
-
-	/**
-	 * An anonymous request cannot list readings.
-	 */
-	public function test_anonymous_cannot_list_readings(): void {
-		$this->create_reading();
-
-		$request  = new WP_REST_Request( 'GET', '/wp/v2/bp-readings' );
-		$response = rest_get_server()->dispatch( $request );
-
-		$this->assertSame( 401, $response->get_status() );
-	}
-
-	/**
-	 * An anonymous request cannot read a single reading.
-	 */
-	public function test_anonymous_cannot_read_single_reading(): void {
-		$post_id = $this->create_reading();
-
-		$request  = new WP_REST_Request( 'GET', '/wp/v2/bp-readings/' . $post_id );
-		$response = rest_get_server()->dispatch( $request );
-
-		$this->assertSame( 401, $response->get_status() );
-	}
-
-	/**
-	 * A logged-in user only sees their own readings in the collection.
-	 */
-	public function test_user_only_sees_own_readings_in_collection(): void {
-		$owner_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
-		$other_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
-
-		$own_post_id   = $this->create_reading( array(), array( 'post_author' => $owner_id ) );
-		$other_post_id = $this->create_reading( array(), array( 'post_author' => $other_id ) );
-
-		wp_set_current_user( $owner_id );
-
-		$request  = new WP_REST_Request( 'GET', '/wp/v2/bp-readings' );
-		$response = rest_get_server()->dispatch( $request );
-		$ids      = wp_list_pluck( $response->get_data(), 'id' );
-
-		$this->assertSame( 200, $response->get_status() );
-		$this->assertContains( $own_post_id, $ids );
-		$this->assertNotContains( $other_post_id, $ids );
-	}
-
-	/**
-	 * A logged-in user can read their own reading.
-	 */
-	public function test_owner_can_read_own_reading(): void {
-		$owner_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
-		$post_id  = $this->create_reading( array(), array( 'post_author' => $owner_id ) );
-
-		wp_set_current_user( $owner_id );
-
-		$request  = new WP_REST_Request( 'GET', '/wp/v2/bp-readings/' . $post_id );
-		$response = rest_get_server()->dispatch( $request );
-
-		$this->assertSame( 200, $response->get_status() );
-	}
-
-	/**
-	 * A logged-in user cannot read another user's reading.
-	 */
-	public function test_user_cannot_read_others_reading(): void {
-		$owner_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
-		$other_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
-		$post_id  = $this->create_reading( array(), array( 'post_author' => $owner_id ) );
-
-		wp_set_current_user( $other_id );
-
-		$request  = new WP_REST_Request( 'GET', '/wp/v2/bp-readings/' . $post_id );
-		$response = rest_get_server()->dispatch( $request );
-
-		$this->assertSame( 403, $response->get_status() );
 	}
 }

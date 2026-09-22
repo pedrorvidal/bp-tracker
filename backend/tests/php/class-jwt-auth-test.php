@@ -35,11 +35,6 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 	public function setUp(): void {
 		parent::setUp();
 
-		// WP core wipes the meta key registry before every test; the
-		// "protected endpoint" tests below post to the bp_reading REST
-		// endpoint, which needs it re-registered. See BP_Tracker_CPT_Test.
-		BP_Tracker_CPT::register_meta();
-
 		$this->user_id = self::factory()->user->create(
 			array(
 				'role'       => 'administrator',
@@ -240,18 +235,19 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * A protected endpoint rejects requests without a Bearer token.
+	 * A protected endpoint outside bp-tracker/v1/auth (bp-tracker/v1/readings,
+	 * owned by BP_Tracker_REST_Controller) rejects requests without a Bearer
+	 * token -- proves validate_token() authenticates any REST route, not
+	 * just this class' own.
 	 */
 	public function test_protected_endpoint_rejects_without_token(): void {
 		$response = $this->dispatch(
 			'POST',
-			'/wp/v2/bp-readings',
+			'/bp-tracker/v1/readings',
 			array(
-				'meta' => array(
-					'reading_datetime' => '2026-09-22T08:30:00+00:00',
-					'systolic'         => 120,
-					'diastolic'        => 80,
-				),
+				'reading_datetime' => '2026-09-22T08:30:00+00:00',
+				'systolic'         => 120,
+				'diastolic'        => 80,
 			)
 		);
 
@@ -259,7 +255,7 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * A protected endpoint accepts requests carrying a valid Bearer token.
+	 * The same protected endpoint accepts requests carrying a valid Bearer token.
 	 */
 	public function test_protected_endpoint_accepts_with_valid_token(): void {
 		$login = $this->dispatch(
@@ -274,13 +270,11 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 
 		$response = $this->dispatch(
 			'POST',
-			'/wp/v2/bp-readings',
+			'/bp-tracker/v1/readings',
 			array(
-				'meta' => array(
-					'reading_datetime' => '2026-09-22T08:30:00+00:00',
-					'systolic'         => 120,
-					'diastolic'        => 80,
-				),
+				'reading_datetime' => '2026-09-22T08:30:00+00:00',
+				'systolic'         => 120,
+				'diastolic'        => 80,
 			)
 		);
 
