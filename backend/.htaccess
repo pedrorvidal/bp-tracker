@@ -1,0 +1,5 @@
+# Never serve dotfiles from the plugin directory: backend/.env holds the JWT
+# secret. (Apache 2.4. On nginx, add: location ~ /\. { deny all; })
+<FilesMatch "^\.">
+	Require all denied
+</FilesMatch>

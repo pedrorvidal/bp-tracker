@@ -82,6 +82,15 @@ jobs:
         working-directory: .
         run: npm ci
 
+      # wp-env activates the plugin on start, and activation requires a JWT
+      # secret. The runner has no backend/.env, so create one from the example
+      # with a throwaway secret (PHPUnit itself defines its own test values).
+      - name: Create backend/.env
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          cp .env.example .env
+          sed -i "s|^BP_TRACKER_JWT_SECRET=.*|BP_TRACKER_JWT_SECRET=$(openssl rand -base64 48)|" .env
+
       # The tests container mounts ./backend (including the vendor/ directory
       # installed above) and provides the WordPress PHPUnit library and MySQL.
       - name: Start wp-env

@@ -22,10 +22,12 @@ Personal blood pressure tracker. Monorepo:
 ```bash
 npm install                        # installs wp-env
 (cd backend && composer install)
+cp backend/.env.example backend/.env
+# set BP_TRACKER_JWT_SECRET in backend/.env (openssl rand -base64 48)
 npx wp-env start
 ```
 
-This starts a dev site at `http://localhost:8888` and a test site at `http://localhost:8889`, both with the plugin active. Log in to the dev site with `admin` / `password`. See [Configuration](#configuration) for the two `wp-config.php` constants the API needs.
+This starts a dev site at `http://localhost:8888` and a test site at `http://localhost:8889`, both with the plugin active. Log in to the dev site with `admin` / `password`. Before the first start, create `backend/.env` (see [Configuration](#configuration)); without it, plugin activation fails.
 
 ### Frontend
 
@@ -80,50 +82,61 @@ Every check in a workflow runs even when an earlier one fails, so a single run r
 
 ## Configuration
 
-The plugin's JWT authentication (`BP_Tracker_JWT_Auth`) needs two constants defined in `wp-config.php` — they are intentionally **not** stored in the database.
+The plugin needs two settings. They are **not** stored in the database, and neither is committed to the repository.
 
-### `BP_TRACKER_JWT_SECRET`
+| Setting                      | Required               | Purpose                                              |
+| ---------------------------- | ---------------------- | ---------------------------------------------------- |
+| `BP_TRACKER_JWT_SECRET`      | Yes, at least 32 bytes | HMAC-SHA256 key that signs access tokens             |
+| `BP_TRACKER_FRONTEND_ORIGIN` | No                     | The only origin allowed to call the API cross-origin |
 
-Signing secret (HMAC-SHA256) for access tokens. Required — the auth endpoints return a `500` error until this is set. Generate a random 64-byte secret and add it to `wp-config.php` (above the `/* That's all, stop editing! */` line):
+### Local development: `backend/.env`
 
 ```bash
-php -r "echo bin2hex(random_bytes(64)) . PHP_EOL;"
+cp backend/.env.example backend/.env
+openssl rand -base64 48     # paste the output as BP_TRACKER_JWT_SECRET
 ```
+
+```dotenv
+BP_TRACKER_JWT_SECRET=<the generated value>
+BP_TRACKER_FRONTEND_ORIGIN=http://localhost:5173   # the Vite dev server
+```
+
+Create the file **before** `npx wp-env start`, because wp-env activates the plugin and activation needs the secret. `backend/.env` is gitignored; only `backend/.env.example`, which has placeholders, is committed. Changes take effect on the next PHP request, with no need to restart wp-env.
+
+`backend/bp-tracker.php` loads the file with [vlucas/phpdotenv](https://github.com/vlucas/phpdotenv) (`Dotenv::createImmutable(...)->safeLoad()`). Each setting is resolved in this order, and the first one found wins:
+
+1. **A constant already defined**, e.g. in `wp-config.php`. It is never overridden.
+2. **A real environment variable** of the PHP process, e.g. set by Docker or CI.
+3. **`backend/.env`**.
+
+Values from the file go into `$_ENV` only, never into `putenv()`, so they don't leak into the environment of processes PHP starts.
+
+### Production and staging
+
+Define the constants in `wp-config.php`, above the `/* That's all, stop editing! */` line, or set them as real environment variables. A `backend/.env` file works too, but only if the web server refuses to serve it (see below).
 
 ```php
-define( 'BP_TRACKER_JWT_SECRET', 'paste-the-generated-value-here' );
+define( 'BP_TRACKER_JWT_SECRET', 'output of: openssl rand -base64 48' );
+define( 'BP_TRACKER_FRONTEND_ORIGIN', 'https://app.example.com' );
 ```
 
-Treat it like any other credential: never commit it, and rotating it immediately invalidates every access token currently in circulation (refresh tokens are unaffected, since they're validated against the database, not the JWT secret).
+### Safeguards
 
-### `BP_TRACKER_FRONTEND_ORIGIN`
+- **Activation fails** with a clear message if `BP_TRACKER_JWT_SECRET` is missing or shorter than 32 bytes, so the plugin never runs without a usable secret. If the secret disappears after activation, the auth endpoints return `500 bp_tracker_jwt_misconfigured`.
+- **`backend/.env` is inside the plugin directory, which is web-accessible.** `backend/.htaccess` blocks every dotfile on Apache, including wp-env. Without it, `/wp-content/plugins/bp-tracker/.env` would be downloadable. **On nginx `.htaccess` is ignored**, so add `location ~ /\. { deny all; }` to the server block.
+- **Rotating the secret** immediately invalidates every access token in circulation. Refresh tokens are unaffected, because they are validated against the database, not the secret. Clients simply refresh.
 
-The frontend's origin: scheme, host and port, with no trailing slash. It is the only origin allowed to call the `bp-tracker/v1` REST namespace cross-origin:
+### `BP_TRACKER_FRONTEND_ORIGIN` and CORS
 
-```php
-define( 'BP_TRACKER_FRONTEND_ORIGIN', 'http://localhost:5173' );
-```
+The origin must be exact: scheme, host and port, with no trailing slash. For the `bp-tracker/v1` namespace, the plugin (`BP_Tracker_CORS`) replaces WordPress core's default CORS behavior, which reflects any origin with credentials allowed:
 
-For this namespace, the plugin (`BP_Tracker_CORS`) replaces WordPress core's default CORS behavior. By default, core reflects any origin with credentials allowed. Only an exact match on scheme, host and port gets `Access-Control-Allow-*` headers, so `http://localhost:5174` or `https://localhost:5173` are rejected. Credentials are allowed for that exact origin only, so the frontend can send the `HttpOnly` refresh cookie to `/auth/*`. Other namespaces such as `wp/v2` keep core's behavior.
+- Only an exact match gets `Access-Control-Allow-*` headers. `http://localhost:5174` and `https://localhost:5173` are rejected.
+- Credentials are allowed for that exact origin only, so the frontend can send the `HttpOnly` refresh cookie to `/auth/*`.
+- Other namespaces, such as `wp/v2`, keep core's behavior.
 
-If the constant is left undefined, no origin is allowed. Same-origin requests and non-browser clients such as `curl` still work, but cross-origin browser requests are blocked. The frontend's dev server is pinned to port `5173` for this reason (see `frontend/vite.config.ts`).
+If the setting is left undefined, no origin is allowed. Same-origin requests and non-browser clients such as `curl` still work, but cross-origin browser requests are blocked. This is why the frontend's dev server is pinned to port `5173` (see `frontend/vite.config.ts`).
 
-For local development, create `.wp-env.override.json` at the repository root to set both constants for the `wp-env` dev site. The file is gitignored; never commit it. With it in place, `curl` and the frontend can call `http://localhost:8888` right away (see `docs/api.md` for examples). Then run `npx wp-env start` again.
-
-```json
-{
-  "env": {
-    "development": {
-      "config": {
-        "BP_TRACKER_JWT_SECRET": "paste-a-generated-secret-here",
-        "BP_TRACKER_FRONTEND_ORIGIN": "http://localhost:5173"
-      }
-    }
-  }
-}
-```
-
-The test site doesn't need this file, because `backend/tests/bootstrap.php` defines test values. Production and staging need their own values, defined directly in `wp-config.php`.
+The test site needs no `.env`: `backend/tests/bootstrap.php` defines test values before the plugin loads. CI creates a throwaway `backend/.env` only so that wp-env can activate the plugin.
 
 ## Authentication
 

@@ -141,11 +141,11 @@ The login and refresh responses share one shape:
 
 Errors shared by the auth routes:
 
-| Status | `code`                               | Cause                                                         |
-| ------ | ------------------------------------ | ------------------------------------------------------------- |
-| `403`  | `bp_tracker_jwt_missing_csrf_header` | `X-BP-Tracker-CSRF: 1` missing or with another value          |
-| `401`  | `bp_tracker_jwt_invalid_token`       | An invalid or expired `Authorization: Bearer` header was sent |
-| `500`  | `bp_tracker_jwt_misconfigured`       | `BP_TRACKER_JWT_SECRET` is not defined in `wp-config.php`     |
+| Status | `code`                               | Cause                                                                                      |
+| ------ | ------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `403`  | `bp_tracker_jwt_missing_csrf_header` | `X-BP-Tracker-CSRF: 1` missing or with another value                                       |
+| `401`  | `bp_tracker_jwt_invalid_token`       | An invalid or expired `Authorization: Bearer` header was sent                              |
+| `500`  | `bp_tracker_jwt_misconfigured`       | `BP_TRACKER_JWT_SECRET` is not configured (`backend/.env`, environment or `wp-config.php`) |
 
 The curl examples below keep the cookie in a jar file (`-c` writes it, `-b` sends it), the same way a browser does.
 

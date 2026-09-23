@@ -22,10 +22,12 @@ coverage/
 .eslintcache
 *.tsbuildinfo
 
-# Environment
+# Environment (local secrets; .env.example files are committed)
 .env
 .env.*
 !.env.example
+backend/.env
+!backend/.env.example
 
 # OS / editor
 .DS_Store

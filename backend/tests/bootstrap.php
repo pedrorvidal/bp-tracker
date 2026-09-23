@@ -16,6 +16,8 @@ if ( ! $bp_tracker_tests_dir ) {
 
 require_once $bp_tracker_tests_dir . '/includes/functions.php';
 
+// Test values, defined before the plugin loads: existing constants win over
+// backend/.env, so the suite never depends on (or reads) a developer's .env.
 if ( ! defined( 'BP_TRACKER_JWT_SECRET' ) ) {
 	define( 'BP_TRACKER_JWT_SECRET', 'test-secret-do-not-use-in-production' );
 }
