@@ -15,7 +15,7 @@ export default function App() {
           {isAuthenticated && (
             <div className="flex items-center gap-3">
               <span className="hidden text-sm text-slate-700 sm:inline">
-                {user?.username}
+                {user?.displayName}
               </span>
               <button
                 type="button"

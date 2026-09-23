@@ -4,7 +4,7 @@ import {
   type AxiosResponse,
   type InternalAxiosRequestConfig,
 } from 'axios'
-import { api } from '../lib/api'
+import { CSRF_HEADER, api } from '../lib/api'
 
 export type MockReply = { status: number; data?: unknown } | 'network-error'
 
@@ -17,6 +17,10 @@ export interface RecordedCall {
   body: unknown
   /** Value of the Authorization header, if any. */
   authorization: string | undefined
+  /** Value of the CSRF header, if any. */
+  csrf: string | undefined
+  /** Whether cookies (the refresh cookie) would be sent. */
+  withCredentials: boolean
 }
 
 export interface MockApi {
@@ -52,11 +56,14 @@ export function mockApi(routes: Record<string, Handler | Handler[]>): MockApi {
   ): Promise<AxiosResponse> => {
     const key = `${(config.method ?? 'get').toUpperCase()} ${config.url ?? ''}`
     const authorization = config.headers.get('Authorization')
+    const csrf = config.headers.get(CSRF_HEADER)
     const call: RecordedCall = {
       key,
       body: parseBody(config.data),
       authorization:
         typeof authorization === 'string' ? authorization : undefined,
+      csrf: typeof csrf === 'string' ? csrf : undefined,
+      withCredentials: config.withCredentials === true,
     }
     calls.push(call)
 
@@ -111,11 +118,37 @@ export function mockApi(routes: Record<string, Handler | Handler[]>): MockApi {
   }
 }
 
+/** Resolvers of deferred replies still pending, settled by restoreApi(). */
+const pendingReplies = new Set<(reply: MockReply) => void>()
+
 export function restoreApi(): void {
   api.defaults.adapter = originalAdapter
+  // A test that failed before resolving its deferred reply would otherwise
+  // leave a request (e.g. the single-flight refresh) pending forever and
+  // break every later test in the file.
+  pendingReplies.forEach((resolve) => resolve('network-error'))
+  pendingReplies.clear()
 }
 
 /** WordPress REST error body. */
 export function restError(code: string, message: string, status: number) {
   return { status, data: { code, message, data: { status } } }
+}
+
+/**
+ * A reply the test resolves later. The promise exists up front, so it can be
+ * resolved before or after the request reaches the adapter (axios runs its
+ * interceptors asynchronously).
+ */
+export function deferredReply() {
+  let resolve: (reply: MockReply) => void = () => undefined
+  const promise = new Promise<MockReply>((r) => {
+    resolve = r
+  })
+  const settle = (reply: MockReply) => {
+    pendingReplies.delete(settle)
+    resolve(reply)
+  }
+  pendingReplies.add(settle)
+  return { handler: () => promise, resolve: settle }
 }

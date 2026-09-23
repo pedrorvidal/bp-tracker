@@ -4,26 +4,27 @@ REST endpoints exposed by the `bp-tracker` plugin. All routes live under the `bp
 
 Base URL in local dev: `http://localhost:8888/wp-json`.
 
-| Method   | Path                              | Auth required | Description                          |
-| -------- | --------------------------------- | ------------- | ------------------------------------ |
-| `POST`   | `/bp-tracker/v1/auth/login`       | No            | Exchange credentials for tokens      |
-| `POST`   | `/bp-tracker/v1/auth/refresh`     | No            | Rotate a refresh token               |
-| `POST`   | `/bp-tracker/v1/auth/logout`      | Yes           | Revoke a refresh token               |
-| `GET`    | `/bp-tracker/v1/readings`         | Yes           | List the caller's readings           |
-| `POST`   | `/bp-tracker/v1/readings`         | Yes           | Create a reading                     |
-| `GET`    | `/bp-tracker/v1/readings/{id}`    | Yes (owner)   | Get one reading                      |
-| `PUT`    | `/bp-tracker/v1/readings/{id}`    | Yes (owner)   | Partially update a reading           |
-| `DELETE` | `/bp-tracker/v1/readings/{id}`    | Yes (owner)   | Delete a reading                     |
-| `GET`    | `/bp-tracker/v1/stats`            | Yes           | Averages and count over a period     |
+| Method   | Path                           | Auth required                | Description                      |
+| -------- | ------------------------------ | ---------------------------- | -------------------------------- |
+| `POST`   | `/bp-tracker/v1/auth/login`    | CSRF header                  | Exchange credentials for tokens  |
+| `POST`   | `/bp-tracker/v1/auth/refresh`  | Refresh cookie + CSRF header | Rotate the refresh token         |
+| `POST`   | `/bp-tracker/v1/auth/logout`   | Refresh cookie + CSRF header | Revoke the refresh token         |
+| `GET`    | `/bp-tracker/v1/readings`      | Yes                          | List the caller's readings       |
+| `POST`   | `/bp-tracker/v1/readings`      | Yes                          | Create a reading                 |
+| `GET`    | `/bp-tracker/v1/readings/{id}` | Yes (owner)                  | Get one reading                  |
+| `PUT`    | `/bp-tracker/v1/readings/{id}` | Yes (owner)                  | Partially update a reading       |
+| `DELETE` | `/bp-tracker/v1/readings/{id}` | Yes (owner)                  | Delete a reading                 |
+| `GET`    | `/bp-tracker/v1/stats`         | Yes                          | Averages and count over a period |
 
 ## Conventions
 
 ### Headers
 
-| Header                                  | When                                                     |
-| --------------------------------------- | -------------------------------------------------------- |
-| `Authorization: Bearer <access_token>`  | Every route marked "Auth required" above.                |
-| `Content-Type: application/json`        | Every request that sends a JSON body (`POST`, `PUT`).    |
+| Header                                 | When                                                            |
+| -------------------------------------- | --------------------------------------------------------------- |
+| `Authorization: Bearer <access_token>` | Every readings/stats route. **Never** on `/auth/*` (see below). |
+| `X-BP-Tracker-CSRF: 1`                 | Every `/auth/*` route.                                          |
+| `Content-Type: application/json`       | Every request that sends a JSON body (`POST`, `PUT`).           |
 
 WordPress cookie authentication (with an `X-WP-Nonce` header) also works, since the routes only check for a logged-in user. The frontend uses Bearer tokens.
 
@@ -41,10 +42,10 @@ Every error uses the standard WordPress REST error shape:
 
 Errors that apply to every route:
 
-| Status | `code`                         | Cause                                                                                    |
-| ------ | ------------------------------ | ---------------------------------------------------------------------------------------- |
-| `400`  | `rest_missing_callback_param`  | A required parameter is missing. `data.params` lists the missing names.                  |
-| `400`  | `rest_invalid_param`           | A parameter has the wrong type, is out of range, or is not a valid date. See below.       |
+| Status | `code`                         | Cause                                                                                                          |
+| ------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `400`  | `rest_missing_callback_param`  | A required parameter is missing. `data.params` lists the missing names.                                        |
+| `400`  | `rest_invalid_param`           | A parameter has the wrong type, is out of range, or is not a valid date. See below.                            |
 | `401`  | `bp_tracker_jwt_invalid_token` | An `Authorization: Bearer` header was sent, but the token is malformed, expired or signed with another secret. |
 
 Example of `rest_invalid_param` (out-of-range value):
@@ -78,13 +79,14 @@ Browsers may call the `bp-tracker/v1` namespace cross-origin only from the origi
 ```
 Access-Control-Allow-Origin: http://localhost:5173
 Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
-Access-Control-Allow-Headers: Authorization, Content-Type
+Access-Control-Allow-Headers: Authorization, Content-Type, X-BP-Tracker-CSRF
+Access-Control-Allow-Credentials: true
 Access-Control-Max-Age: 600
 Access-Control-Expose-Headers: X-WP-Total, X-WP-TotalPages, Link
 Vary: Origin
 ```
 
-Any other origin gets no `Access-Control-Allow-*` headers, so the browser blocks the request. `Access-Control-Allow-Credentials` is never sent. Authenticate with the `Authorization: Bearer` header, not cookies, and don't use `credentials: 'include'` or `withCredentials: true`.
+Any other origin gets no `Access-Control-Allow-*` headers, so the browser blocks the request. Credentials are allowed only so the frontend can send the refresh cookie to `/auth/*`; the origin is never reflected. Send `/auth/*` requests with `credentials: 'include'` (axios: `withCredentials: true`). Data routes use the Bearer header and don't need credentials.
 
 ### Dates
 
@@ -96,53 +98,74 @@ All datetimes are ISO 8601 / RFC 3339 strings with a timezone offset, for exampl
 
 Authentication is built into the plugin (`backend/includes/class-bp-tracker-jwt-auth.php`) and needs no third-party plugin.
 
-- **Access tokens** are HS256-signed JWTs that expire after 1 hour (`expires_in: 3600`).
-- **Refresh tokens** are opaque random strings that last 30 days. They are stored hashed and can be used only once: every refresh rotates them. They can also be revoked, which a bare JWT cannot be.
+- **Access token:** an HS256-signed JWT returned in the JSON body. It expires after 1 hour (`expires_in: 3600`). Send it as `Authorization: Bearer <access_token>` to the readings and stats routes. Browsers should keep it in memory only.
+- **Refresh token:** 32 random bytes, hex-encoded, valid for 30 days. It is **never in a response body**. The server sets it in a cookie that JavaScript can't read:
 
-Send the access token as `Authorization: Bearer <access_token>`. The token authenticates the user on any REST route they can access, not only the `bp-tracker/v1` namespace.
+  ```
+  Set-Cookie: bp_tracker_refresh=<token>; Path=/wp-json/bp-tracker/v1/auth; Max-Age=2592000; HttpOnly; SameSite=Strict[; Secure]
+  ```
 
-Error that applies to all three auth routes:
+  | Attribute         | Effect                                                                                                                                      |
+  | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `HttpOnly`        | JavaScript, including an XSS payload, can't read it.                                                                                        |
+  | `SameSite=Strict` | Other sites can't make the browser send it.                                                                                                 |
+  | `Path`            | Sent to `/auth/*` only, never to data routes. With plain permalinks the path falls back to `/`.                                             |
+  | `Secure`          | Added over HTTPS (`is_ssl()`). If a proxy terminates TLS without WordPress detecting it, use the `bp_tracker_refresh_cookie_secure` filter. |
 
-| Status | `code`                         | Cause                                                          |
-| ------ | ------------------------------ | -------------------------------------------------------------- |
-| `500`  | `bp_tracker_jwt_misconfigured` | `BP_TRACKER_JWT_SECRET` is not defined in `wp-config.php`.     |
+  On the server, only a SHA-256 hash of each refresh token is stored (`wp_bp_tracker_refresh_tokens`). Every refresh consumes the presented token atomically and issues a new one, so each token works once, even when two requests present it at the same moment.
 
-### `POST /bp-tracker/v1/auth/login`
+- **CSRF protection:** the browser sends the cookie automatically, so every `/auth/*` route requires the header `X-BP-Tracker-CSRF: 1`. A custom header forces a CORS preflight, which only `BP_TRACKER_FRONTEND_ORIGIN` passes. Without the header, the response is `403 bp_tracker_jwt_missing_csrf_header`.
+- **No Bearer on `/auth/*`:** any request with an invalid or expired `Authorization: Bearer` header is rejected with `401 bp_tracker_jwt_invalid_token` before it reaches the route. Clients must not send one to `/auth/*`, which is exactly when a stale access token is likely.
 
-Checks the credentials with `wp_authenticate()` and returns a new token pair.
-
-**Headers:** `Content-Type: application/json`
-
-**Body:**
-
-| Field      | Type   | Required |
-| ---------- | ------ | -------- |
-| `username` | string | Yes      |
-| `password` | string | Yes      |
-
-```bash
-curl -s -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"password"}'
-```
-
-**Success: `200 OK`**
+The login and refresh responses share one shape:
 
 ```json
 {
   "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-  "refresh_token": "66ebb904a79295817cf2bf8e26dbe40006bfb9b7809fd37e81aa1ae59a1025dc",
   "token_type": "Bearer",
-  "expires_in": 3600
+  "expires_in": 3600,
+  "user": { "id": 1, "username": "admin", "display_name": "Ada Admin" }
 }
 ```
 
+Errors shared by the auth routes:
+
+| Status | `code`                               | Cause                                                         |
+| ------ | ------------------------------------ | ------------------------------------------------------------- |
+| `403`  | `bp_tracker_jwt_missing_csrf_header` | `X-BP-Tracker-CSRF: 1` missing or with another value          |
+| `401`  | `bp_tracker_jwt_invalid_token`       | An invalid or expired `Authorization: Bearer` header was sent |
+| `500`  | `bp_tracker_jwt_misconfigured`       | `BP_TRACKER_JWT_SECRET` is not defined in `wp-config.php`     |
+
+The curl examples below keep the cookie in a jar file (`-c` writes it, `-b` sends it), the same way a browser does.
+
+### `POST /bp-tracker/v1/auth/login`
+
+Checks the credentials with `wp_authenticate()`. Returns the access token and user, and sets the refresh cookie.
+
+**Headers:** `Content-Type: application/json`, `X-BP-Tracker-CSRF: 1`
+
+**Body:**
+
+| Field      | Type   | Required                  |
+| ---------- | ------ | ------------------------- |
+| `username` | string | Yes (login name or email) |
+| `password` | string | Yes                       |
+
+```bash
+curl -s -c cookies.txt -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -H "X-BP-Tracker-CSRF: 1" \
+  -d '{"username":"admin","password":"password"}'
+```
+
+**Success: `200 OK`.** The body has the shape above, plus a `Set-Cookie: bp_tracker_refresh=…` header.
+
 **Errors:**
 
-| Status | `code`                                | Cause                            |
-| ------ | ------------------------------------- | -------------------------------- |
-| `400`  | `rest_missing_callback_param`         | `username` or `password` missing |
-| `403`  | `bp_tracker_jwt_invalid_credentials`  | Wrong username or password       |
+| Status | `code`                               | Cause                            |
+| ------ | ------------------------------------ | -------------------------------- |
+| `400`  | `rest_missing_callback_param`        | `username` or `password` missing |
+| `403`  | `bp_tracker_jwt_invalid_credentials` | Wrong username or password       |
 
 ```json
 {
@@ -154,39 +177,24 @@ curl -s -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/login \
 
 ### `POST /bp-tracker/v1/auth/refresh`
 
-Exchanges a refresh token for a new access/refresh token pair. The refresh token that was sent is deleted, so it can't be used again.
+Exchanges the refresh cookie for a new access token. It also rotates the cookie: the presented token is consumed and a new one is set. The request has no body.
 
-**Headers:** `Content-Type: application/json`
-
-**Body:**
-
-| Field           | Type   | Required |
-| --------------- | ------ | -------- |
-| `refresh_token` | string | Yes      |
+**Headers:** `X-BP-Tracker-CSRF: 1`, plus the `bp_tracker_refresh` cookie
 
 ```bash
-curl -s -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{"refresh_token":"66ebb904a79295817cf2bf8e26dbe40006bfb9b7809fd37e81aa1ae59a1025dc"}'
+curl -s -b cookies.txt -c cookies.txt -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/refresh \
+  -H "X-BP-Tracker-CSRF: 1"
 ```
 
-**Success: `200 OK`.** The response has the same shape as the login response, with new values:
-
-```json
-{
-  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-  "refresh_token": "b3cf2d88b596b955b3c43d9b4ed755ad33c95efe959ce79c5f70913fc7bb5254",
-  "token_type": "Bearer",
-  "expires_in": 3600
-}
-```
+**Success: `200 OK`.** The body has the same shape as login, with a new `access_token`, plus a new `Set-Cookie`.
 
 **Errors:**
 
-| Status | `code`                                 | Cause                                                   |
-| ------ | -------------------------------------- | ------------------------------------------------------- |
-| `400`  | `rest_missing_callback_param`          | `refresh_token` missing                                 |
-| `401`  | `bp_tracker_jwt_invalid_refresh_token` | The token is unknown, expired, already used or revoked  |
+| Status | `code`                                 | Cause                                                                                                                  |
+| ------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `401`  | `bp_tracker_jwt_invalid_refresh_token` | The cookie is missing or malformed, or its token is unknown, expired, already used or revoked, or its user was deleted |
+
+The 401 also clears the cookie (`Max-Age=0`):
 
 ```json
 {
@@ -198,46 +206,22 @@ curl -s -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/refresh \
 
 ### `POST /bp-tracker/v1/auth/logout`
 
-Revokes a refresh token that belongs to the authenticated user. The access token stays valid until it expires, so the client must discard it.
+Revokes the refresh token from the cookie and clears the cookie. No access token is needed: holding the refresh token proves the right to revoke it, and logout must also work after the access token has expired. The request has no body.
 
-**Headers:** `Authorization: Bearer <access_token>`, `Content-Type: application/json`
-
-**Body:**
-
-| Field           | Type   | Required |
-| --------------- | ------ | -------- |
-| `refresh_token` | string | Yes      |
+**Headers:** `X-BP-Tracker-CSRF: 1`, plus the `bp_tracker_refresh` cookie
 
 ```bash
-curl -s -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/logout \
-  -H "Authorization: Bearer $access_token" \
-  -H "Content-Type: application/json" \
-  -d "{\"refresh_token\":\"$refresh_token\"}"
+curl -s -b cookies.txt -c cookies.txt -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/logout \
+  -H "X-BP-Tracker-CSRF: 1"
 ```
 
-**Success: `200 OK`**
+**Success: `200 OK`.** The response includes `Set-Cookie: bp_tracker_refresh=; …; Max-Age=0`.
 
 ```json
 { "success": true }
 ```
 
-The response is `200` even when the refresh token didn't exist or was already revoked, so logging out twice is safe.
-
-**Errors:**
-
-| Status | `code`                         | Cause                    |
-| ------ | ------------------------------ | ------------------------ |
-| `400`  | `rest_missing_callback_param`  | `refresh_token` missing  |
-| `401`  | `bp_tracker_jwt_unauthorized`  | No access token sent     |
-| `401`  | `bp_tracker_jwt_invalid_token` | Access token invalid     |
-
-```json
-{
-  "code": "bp_tracker_jwt_unauthorized",
-  "message": "Authentication required.",
-  "data": { "status": 401 }
-}
-```
+The response is `200` even without a cookie, or with a token that was already revoked, so logging out twice is safe. It only revokes the presented token; the user's other sessions (other devices) are untouched.
 
 ---
 
@@ -263,23 +247,23 @@ Every route that returns readings uses this shape. The raw post object is never 
 }
 ```
 
-| Field              | Type           | On create | Constraints                                    |
-| ------------------ | -------------- | --------- | ---------------------------------------------- |
-| `id`               | integer        | Read-only |                                                |
-| `reading_datetime` | string         | Required  | ISO 8601 date-time                             |
-| `systolic`         | integer        | Required  | 60–250 mmHg                                    |
-| `diastolic`        | integer        | Required  | 40–150 mmHg                                    |
-| `pulse`            | integer / null | Optional  | 30–220 bpm; `null` when not set                |
-| `weight`           | number / null  | Optional  | `null` when not set                            |
-| `notes`            | string         | Optional  | `""` when not set                              |
+| Field              | Type           | On create | Constraints                     |
+| ------------------ | -------------- | --------- | ------------------------------- |
+| `id`               | integer        | Read-only |                                 |
+| `reading_datetime` | string         | Required  | ISO 8601 date-time              |
+| `systolic`         | integer        | Required  | 60–250 mmHg                     |
+| `diastolic`        | integer        | Required  | 40–150 mmHg                     |
+| `pulse`            | integer / null | Optional  | 30–220 bpm; `null` when not set |
+| `weight`           | number / null  | Optional  | `null` when not set             |
+| `notes`            | string         | Optional  | `""` when not set               |
 
 ### Errors shared by the readings routes
 
-| Status | `code`                        | Cause                                                              |
-| ------ | ----------------------------- | ------------------------------------------------------------------ |
-| `401`  | `bp_tracker_rest_forbidden`   | No authenticated user                                              |
-| `403`  | `bp_tracker_rest_forbidden`   | The reading belongs to another user (`/readings/{id}` routes only) |
-| `404`  | `bp_tracker_rest_not_found`   | The reading doesn't exist (`/readings/{id}` routes only)           |
+| Status | `code`                      | Cause                                                              |
+| ------ | --------------------------- | ------------------------------------------------------------------ |
+| `401`  | `bp_tracker_rest_forbidden` | No authenticated user                                              |
+| `403`  | `bp_tracker_rest_forbidden` | The reading belongs to another user (`/readings/{id}` routes only) |
+| `404`  | `bp_tracker_rest_not_found` | The reading doesn't exist (`/readings/{id}` routes only)           |
 
 ```json
 {
@@ -313,12 +297,12 @@ Lists the caller's readings, newest `reading_datetime` first, with pagination.
 
 **Query parameters:**
 
-| Param          | Type    | Default | Constraints                          |
-| -------------- | ------- | ------- | ------------------------------------ |
-| `page`         | integer | `1`     | ≥ 1                                  |
-| `per_page`     | integer | `10`    | 1–100                                |
-| `period_start` | string  | none    | ISO 8601 date-time, inclusive        |
-| `period_end`   | string  | none    | ISO 8601 date-time, inclusive        |
+| Param          | Type    | Default | Constraints                   |
+| -------------- | ------- | ------- | ----------------------------- |
+| `page`         | integer | `1`     | ≥ 1                           |
+| `per_page`     | integer | `10`    | 1–100                         |
+| `period_start` | string  | none    | ISO 8601 date-time, inclusive |
+| `period_end`   | string  | none    | ISO 8601 date-time, inclusive |
 
 ```bash
 curl -s -i "http://localhost:8888/wp-json/bp-tracker/v1/readings?per_page=20&period_start=2026-09-01T00:00:00%2B00:00" \
@@ -365,7 +349,9 @@ If the page is past the last page, the response is `200` with an empty array `[]
   "message": "Invalid parameter(s): per_page",
   "data": {
     "status": 400,
-    "params": { "per_page": "per_page must be between 1 (inclusive) and 100 (inclusive)" },
+    "params": {
+      "per_page": "per_page must be between 1 (inclusive) and 100 (inclusive)"
+    },
     "details": {
       "per_page": {
         "code": "rest_out_of_bounds",
@@ -408,11 +394,11 @@ curl -s -X POST http://localhost:8888/wp-json/bp-tracker/v1/readings \
 
 **Errors:**
 
-| Status | `code`                        | Cause                                                    |
-| ------ | ----------------------------- | -------------------------------------------------------- |
-| `400`  | `rest_missing_callback_param` | A required field is missing                              |
+| Status | `code`                        | Cause                                                              |
+| ------ | ----------------------------- | ------------------------------------------------------------------ |
+| `400`  | `rest_missing_callback_param` | A required field is missing                                        |
 | `400`  | `rest_invalid_param`          | A field is out of range, has the wrong type or has an invalid date |
-| `401`  | `bp_tracker_rest_forbidden`   | Not authenticated                                        |
+| `401`  | `bp_tracker_rest_forbidden`   | Not authenticated                                                  |
 
 ```json
 {
@@ -468,11 +454,11 @@ curl -s -X PUT http://localhost:8888/wp-json/bp-tracker/v1/readings/7 \
 
 **Errors:**
 
-| Status | `code`                          | Cause                                         |
-| ------ | ------------------------------- | --------------------------------------------- |
-| `400`  | `rest_invalid_param`            | A field is out of range or has the wrong type |
-| `400`  | `bp_tracker_rest_invalid_value` | A value was rejected when it was stored       |
-| `401` / `403` / `404` | see [shared errors](#errors-shared-by-the-readings-routes) | |
+| Status                | `code`                                                     | Cause                                         |
+| --------------------- | ---------------------------------------------------------- | --------------------------------------------- |
+| `400`                 | `rest_invalid_param`                                       | A field is out of range or has the wrong type |
+| `400`                 | `bp_tracker_rest_invalid_value`                            | A value was rejected when it was stored       |
+| `401` / `403` / `404` | see [shared errors](#errors-shared-by-the-readings-routes) |                                               |
 
 ```json
 {
@@ -480,7 +466,9 @@ curl -s -X PUT http://localhost:8888/wp-json/bp-tracker/v1/readings/7 \
   "message": "Invalid parameter(s): diastolic",
   "data": {
     "status": 400,
-    "params": { "diastolic": "diastolic must be between 40 (inclusive) and 150 (inclusive)" },
+    "params": {
+      "diastolic": "diastolic must be between 40 (inclusive) and 150 (inclusive)"
+    },
     "details": {
       "diastolic": {
         "code": "rest_out_of_bounds",
@@ -511,10 +499,10 @@ curl -s -X DELETE http://localhost:8888/wp-json/bp-tracker/v1/readings/7 \
 
 **Errors:**
 
-| Status | `code`                          | Cause                                     |
-| ------ | ------------------------------- | ----------------------------------------- |
-| `500`  | `bp_tracker_rest_delete_failed` | WordPress could not delete the post       |
-| `401` / `403` / `404` | see [shared errors](#errors-shared-by-the-readings-routes) | |
+| Status                | `code`                                                     | Cause                               |
+| --------------------- | ---------------------------------------------------------- | ----------------------------------- |
+| `500`                 | `bp_tracker_rest_delete_failed`                            | WordPress could not delete the post |
+| `401` / `403` / `404` | see [shared errors](#errors-shared-by-the-readings-routes) |                                     |
 
 ### `GET /bp-tracker/v1/stats`
 
@@ -524,10 +512,10 @@ Returns the systolic, diastolic and pulse averages and the reading count for the
 
 **Query parameters:**
 
-| Param          | Type   | Constraints                    |
-| -------------- | ------ | ------------------------------ |
-| `period_start` | string | ISO 8601 date-time, inclusive  |
-| `period_end`   | string | ISO 8601 date-time, inclusive  |
+| Param          | Type   | Constraints                   |
+| -------------- | ------ | ----------------------------- |
+| `period_start` | string | ISO 8601 date-time, inclusive |
+| `period_end`   | string | ISO 8601 date-time, inclusive |
 
 ```bash
 curl -s "http://localhost:8888/wp-json/bp-tracker/v1/stats?period_start=2026-09-01T00:00:00%2B00:00&period_end=2026-09-30T23:59:59%2B00:00" \
@@ -566,7 +554,11 @@ When there are no readings in the period:
     "status": 400,
     "params": { "period_start": "Invalid date." },
     "details": {
-      "period_start": { "code": "rest_invalid_date", "message": "Invalid date.", "data": null }
+      "period_start": {
+        "code": "rest_invalid_date",
+        "message": "Invalid date.",
+        "data": null
+      }
     }
   }
 }
@@ -576,17 +568,16 @@ When there are no readings in the period:
 
 ## End-to-end example
 
-This script needs [`jq`](https://jqlang.github.io/jq/).
+This script needs [`jq`](https://jqlang.github.io/jq/). The refresh token stays in `cookies.txt`; the script never reads it.
 
 ```bash
 BASE=http://localhost:8888/wp-json/bp-tracker/v1
+JAR=cookies.txt
 
-# 1. Log in, keep both tokens
-resp=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"password"}')
-access_token=$(echo "$resp" | jq -r .access_token)
-refresh_token=$(echo "$resp" | jq -r .refresh_token)
+# 1. Log in: access token from the body, refresh token into the cookie jar
+access_token=$(curl -s -c $JAR -X POST $BASE/auth/login \
+  -H "Content-Type: application/json" -H "X-BP-Tracker-CSRF: 1" \
+  -d '{"username":"admin","password":"password"}' | jq -r .access_token)
 
 # 2. Create a reading and list readings
 curl -s -X POST $BASE/readings \
@@ -595,16 +586,11 @@ curl -s -X POST $BASE/readings \
   -d '{"reading_datetime":"2026-09-22T08:30:00+00:00","systolic":118,"diastolic":76}'
 curl -s $BASE/readings -H "Authorization: Bearer $access_token"
 
-# 3. Refresh when the access token is close to expiring
-resp=$(curl -s -X POST $BASE/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d "{\"refresh_token\":\"$refresh_token\"}")
-access_token=$(echo "$resp" | jq -r .access_token)
-refresh_token=$(echo "$resp" | jq -r .refresh_token)
+# 3. Refresh (rotates the cookie in the jar)
+access_token=$(curl -s -b $JAR -c $JAR -X POST $BASE/auth/refresh \
+  -H "X-BP-Tracker-CSRF: 1" | jq -r .access_token)
 
-# 4. Log out (revokes the refresh token)
-curl -s -X POST $BASE/auth/logout \
-  -H "Authorization: Bearer $access_token" \
-  -H "Content-Type: application/json" \
-  -d "{\"refresh_token\":\"$refresh_token\"}"
+# 4. Log out: revokes the refresh token and clears the cookie
+curl -s -b $JAR -c $JAR -X POST $BASE/auth/logout -H "X-BP-Tracker-CSRF: 1"
+rm -f $JAR
 ```

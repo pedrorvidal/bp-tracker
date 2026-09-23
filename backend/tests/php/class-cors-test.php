@@ -47,15 +47,16 @@ class BP_Tracker_CORS_Test extends WP_UnitTestCase {
 		$allowed_headers = array_map( 'strtolower', array_map( 'trim', explode( ',', $headers['Access-Control-Allow-Headers'] ) ) );
 		$this->assertContains( 'authorization', $allowed_headers );
 		$this->assertContains( 'content-type', $allowed_headers );
+		$this->assertContains( strtolower( BP_Tracker_JWT_Auth::CSRF_HEADER ), $allowed_headers );
 	}
 
 	/**
-	 * Auth is Bearer-only, so cookies must never be allowed cross-origin.
+	 * The configured origin may send credentials (the HttpOnly refresh cookie).
 	 */
-	public function test_credentials_are_never_allowed(): void {
+	public function test_credentials_are_allowed_for_the_configured_origin(): void {
 		$headers = BP_Tracker_CORS::get_cors_headers( self::FRONTEND, self::FRONTEND );
 
-		$this->assertArrayNotHasKey( 'Access-Control-Allow-Credentials', $headers );
+		$this->assertSame( 'true', $headers['Access-Control-Allow-Credentials'] );
 	}
 
 	/**

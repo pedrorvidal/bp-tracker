@@ -1,11 +1,20 @@
-import axios from 'axios'
 import type { AuthSession, AuthTokensResponse } from '../types'
-import { api, refreshSession, toAuthTokens } from './api'
-import { getRefreshToken, setSession } from './authStore'
-import { getUserIdFromToken } from './jwt'
+import { api, toSession } from './api'
+import { getAuthState, setSession } from './authStore'
+
+/** Tells other tabs of this app that the user signed out. */
+const CHANNEL_NAME = 'bp-tracker-auth'
+
+type AuthMessage = { type: 'logout' }
+
+function openChannel(): BroadcastChannel | null {
+  return typeof BroadcastChannel === 'undefined'
+    ? null
+    : new BroadcastChannel(CHANNEL_NAME)
+}
 
 /**
- * Signs in and stores the new session.
+ * Signs in: the backend sets the refresh cookie and returns the access token.
  *
  * @throws AxiosError When the credentials are rejected or the request fails.
  */
@@ -17,48 +26,51 @@ export async function login(
     username,
     password,
   })
-  const tokens = toAuthTokens(data)
-  const session: AuthSession = {
-    tokens,
-    user: { id: getUserIdFromToken(tokens.accessToken), username },
-  }
+  const session = toSession(data)
 
   setSession(session)
   return session
 }
 
-async function revoke(refreshToken: string): Promise<void> {
-  await api.post('/auth/logout', { refresh_token: refreshToken })
-}
-
 /**
- * Revokes the refresh token on the server, then clears the local session.
+ * Revokes the refresh cookie on the server, clears the local session and
+ * signs out every other open tab.
  *
  * The local session is always cleared, even if the server can't be reached:
  * signing out must never leave the user signed in on this device.
  */
 export async function logout(): Promise<void> {
-  const refreshToken = getRefreshToken()
-
   try {
-    if (refreshToken) {
-      try {
-        await revoke(refreshToken)
-      } catch (error) {
-        // An expired access token can't authenticate /auth/logout. Refresh
-        // (which rotates the pair) and revoke the *new* refresh token, or it
-        // would stay valid on the server for its full lifetime.
-        if (!axios.isAxiosError(error) || error.response?.status !== 401) {
-          throw error
-        }
-        const tokens = await refreshSession()
-        await revoke(tokens.refreshToken)
-      }
-    }
+    await api.post('/auth/logout')
   } catch {
     // Best effort: server-side revocation failed, but the local session is
     // still cleared below.
   } finally {
     setSession(null)
+
+    const channel = openChannel()
+    channel?.postMessage({ type: 'logout' } satisfies AuthMessage)
+    channel?.close()
+  }
+}
+
+/**
+ * Signs this tab out when another tab signs out. Returns a cleanup function.
+ */
+export function listenForLogoutInOtherTabs(): () => void {
+  const channel = openChannel()
+
+  if (!channel) {
+    return () => undefined
+  }
+
+  channel.onmessage = (event: MessageEvent<AuthMessage>) => {
+    if (event.data.type === 'logout' && getAuthState().session) {
+      setSession(null)
+    }
+  }
+
+  return () => {
+    channel.close()
   }
 }

@@ -1,95 +1,64 @@
-import type { AuthSession, AuthTokens } from '../types'
+import type { AuthSession, AuthStatus } from '../types'
 
 /**
  * Single source of truth for the signed-in session.
  *
- * Kept in memory and mirrored to localStorage so a reload keeps the user
- * signed in. Both the axios interceptors (which read and rotate tokens) and
- * AuthContext (which subscribes via useSyncExternalStore) go through here,
- * so a failed refresh anywhere signs the user out everywhere.
+ * Memory only, on purpose: the access token never touches localStorage, and
+ * the refresh token lives in an HttpOnly cookie JavaScript can't read. After
+ * a reload the session is restored by calling /auth/refresh (see
+ * initializeSession() in ./api). Both the axios interceptors and AuthContext
+ * (via useSyncExternalStore) go through here, so a failed refresh anywhere
+ * signs the user out everywhere.
  */
 
-export const AUTH_STORAGE_KEY = 'bp-tracker.auth'
+export interface AuthState {
+  status: AuthStatus
+  session: AuthSession | null
+}
+
+/** Where earlier versions kept both tokens; purged on load. */
+export const LEGACY_STORAGE_KEY = 'bp-tracker.auth'
 
 type Listener = () => void
 
-/** `undefined` until the first read loads it from storage. */
-let session: AuthSession | null | undefined
+let state: AuthState = { status: 'loading', session: null }
 const listeners = new Set<Listener>()
 
-function isAuthSession(value: unknown): value is AuthSession {
-  if (typeof value !== 'object' || value === null) {
-    return false
-  }
-
-  const { tokens, user } = value as Record<string, unknown>
-
-  if (typeof tokens !== 'object' || tokens === null) {
-    return false
-  }
-  if (typeof user !== 'object' || user === null) {
-    return false
-  }
-
-  const t = tokens as Record<string, unknown>
-  const u = user as Record<string, unknown>
-
-  return (
-    typeof t.accessToken === 'string' &&
-    typeof t.refreshToken === 'string' &&
-    typeof t.expiresAt === 'number' &&
-    typeof u.id === 'number' &&
-    typeof u.username === 'string'
-  )
-}
-
-function readStorage(): AuthSession | null {
-  try {
-    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY)
-    if (raw === null) {
-      return null
-    }
-
-    const parsed: unknown = JSON.parse(raw)
-    return isAuthSession(parsed) ? parsed : null
-  } catch {
-    // Storage unavailable (private mode, blocked) or corrupted JSON.
-    return null
-  }
-}
-
-function writeStorage(next: AuthSession | null): void {
-  try {
-    if (next === null) {
-      window.localStorage.removeItem(AUTH_STORAGE_KEY)
-    } else {
-      window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(next))
-    }
-  } catch {
-    // Storage unavailable: the in-memory session still works for this tab.
-  }
-}
-
-export function getSession(): AuthSession | null {
-  if (session === undefined) {
-    session = readStorage()
-  }
-  return session
-}
-
-export function setSession(next: AuthSession | null): void {
-  session = next
-  writeStorage(next)
+function emit(next: AuthState): void {
+  state = next
   listeners.forEach((listener) => listener())
 }
 
-/** Replaces the tokens of the current session, keeping its user. No-op when signed out. */
-export function updateTokens(tokens: AuthTokens): void {
-  const current = getSession()
-
-  if (current !== null) {
-    setSession({ ...current, tokens })
+/** Removes tokens persisted by earlier versions, which kept them in localStorage. */
+export function purgeLegacyStorage(): void {
+  try {
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY)
+  } catch {
+    // Storage unavailable: nothing to purge.
   }
+}
+
+purgeLegacyStorage()
+
+/** The current state. Same object until it changes (safe for useSyncExternalStore). */
+export function getAuthState(): AuthState {
+  return state
+}
+
+export function getSession(): AuthSession | null {
+  return state.session
+}
+
+export function setSession(session: AuthSession | null): void {
+  emit({
+    status: session ? 'authenticated' : 'unauthenticated',
+    session,
+  })
+}
+
+/** Back to the initial "restoring the session" state. */
+export function resetAuthStore(): void {
+  emit({ status: 'loading', session: null })
 }
 
 export function subscribe(listener: Listener): () => void {
@@ -100,9 +69,5 @@ export function subscribe(listener: Listener): () => void {
 }
 
 export function getAccessToken(): string | null {
-  return getSession()?.tokens.accessToken ?? null
-}
-
-export function getRefreshToken(): string | null {
-  return getSession()?.tokens.refreshToken ?? null
+  return state.session?.tokens.accessToken ?? null
 }

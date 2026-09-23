@@ -47,7 +47,13 @@ export interface ReadingStats {
   pulse_average: number | null
 }
 
-export type { AuthSession, AuthTokens, AuthTokensResponse, User } from './auth'
+export type {
+  AuthSession,
+  AuthStatus,
+  AuthTokens,
+  AuthTokensResponse,
+  User,
+} from './auth'
 
 /** Standard WordPress REST error body. */
 export interface ApiErrorResponse {

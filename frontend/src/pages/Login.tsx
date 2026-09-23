@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
+import SessionLoading from '../components/SessionLoading'
 import { useAuth } from '../hooks/useAuth'
 import { isApiError } from '../lib/api'
 
@@ -30,7 +31,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function Login() {
-  const { isAuthenticated, login } = useAuth()
+  const { status, login } = useAuth()
   const location = useLocation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -38,7 +39,11 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false)
   const errorId = useId()
 
-  if (isAuthenticated) {
+  if (status === 'loading') {
+    return <SessionLoading />
+  }
+
+  if (status === 'authenticated') {
     return <Navigate to={getRedirectTarget(location.state)} replace />
   }
 

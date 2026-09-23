@@ -2,9 +2,14 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
-import { getSession, setSession } from '../lib/authStore'
+import { getSession, resetAuthStore, setSession } from '../lib/authStore'
 import { makeSession, makeTokensResponse } from '../test/fixtures'
-import { mockApi, restError, type MockReply } from '../test/mockApi'
+import {
+  deferredReply,
+  mockApi,
+  restError,
+  type MockReply,
+} from '../test/mockApi'
 import { renderWithProviders } from '../test/renderWithProviders'
 import Login from './Login'
 
@@ -145,12 +150,9 @@ describe('Login page', () => {
   })
 
   it('disables the button while signing in', async () => {
-    let finish: (reply: MockReply) => void = () => undefined
+    const pending = deferredReply()
     mockApi({
-      'POST /auth/login': () =>
-        new Promise<MockReply>((resolve) => {
-          finish = resolve
-        }),
+      'POST /auth/login': pending.handler,
     })
     renderLogin()
 
@@ -159,12 +161,32 @@ describe('Login page', () => {
     const button = screen.getByRole('button', { name: 'Signing in…' })
     expect(button).toBeDisabled()
 
-    finish({ status: 200, data: makeTokensResponse('a') })
+    pending.resolve({ status: 200, data: makeTokensResponse('a') })
     await waitFor(() => {
       expect(
         screen.getByRole('heading', { name: 'Home page' }),
       ).toBeInTheDocument()
     })
+  })
+
+  it('shows a loading state (not the form) while the session is restored', async () => {
+    resetAuthStore()
+    const pending = deferredReply()
+    mockApi({ 'POST /auth/refresh': pending.handler })
+    renderLogin()
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading…')
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument()
+
+    pending.resolve(
+      restError(
+        'bp_tracker_jwt_invalid_refresh_token',
+        'Invalid or expired refresh token.',
+        401,
+      ),
+    )
+
+    expect(await screen.findByLabelText('Password')).toBeInTheDocument()
   })
 
   it('redirects away when already signed in', () => {

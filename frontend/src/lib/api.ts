@@ -1,11 +1,10 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
-import type { ApiErrorResponse, AuthTokens, AuthTokensResponse } from '../types'
-import {
-  getAccessToken,
-  getRefreshToken,
-  setSession,
-  updateTokens,
-} from './authStore'
+import type {
+  ApiErrorResponse,
+  AuthSession,
+  AuthTokensResponse,
+} from '../types'
+import { getAccessToken, getAuthState, setSession } from './authStore'
 
 declare module 'axios' {
   interface InternalAxiosRequestConfig {
@@ -18,35 +17,39 @@ export const DEFAULT_API_URL = 'http://localhost:8888/wp-json/bp-tracker/v1'
 
 export const API_URL: string = import.meta.env.VITE_API_URL || DEFAULT_API_URL
 
+/** Header the backend requires on every /auth route (see docs/api.md). */
+export const CSRF_HEADER = 'X-BP-Tracker-CSRF'
+
+/** Web Lock serializing refreshes across tabs, which share the refresh cookie. */
+export const REFRESH_LOCK = 'bp-tracker-refresh'
+
 /** Pre-configured client for the bp-tracker/v1 namespace. */
 export const api = axios.create({
   baseURL: API_URL,
   headers: { 'Content-Type': 'application/json' },
 })
 
-/**
- * Routes that must never carry a Bearer token: the backend rejects any
- * request with an invalid/expired Bearer header before reaching the route,
- * which would make it impossible to log in or refresh with a stale token.
- */
-const UNAUTHENTICATED_PATHS = ['/auth/login', '/auth/refresh']
+const AUTH_PATHS = ['/auth/login', '/auth/refresh', '/auth/logout']
 
-/** Auth routes whose 401s must not trigger an automatic refresh. */
-const AUTH_PATHS = [...UNAUTHENTICATED_PATHS, '/auth/logout']
-
-function matchesPath(url: string | undefined, paths: string[]): boolean {
+function isAuthPath(url: string | undefined): boolean {
   if (!url) {
     return false
   }
   const path = url.split('?')[0] ?? ''
-  return paths.some((p) => path === p || path.endsWith(p))
+  return AUTH_PATHS.some((p) => path === p || path.endsWith(p))
 }
 
-/** Adds "Authorization: Bearer <access_token>" when signed in (except on login/refresh). */
-export function attachAccessToken(
+/**
+ * Auth routes: send the refresh cookie (withCredentials) and the CSRF header,
+ * never a Bearer token (the backend rejects any request carrying a stale one).
+ * Everything else: "Authorization: Bearer <access token>" when signed in.
+ */
+export function prepareRequest(
   config: InternalAxiosRequestConfig,
 ): InternalAxiosRequestConfig {
-  if (matchesPath(config.url, UNAUTHENTICATED_PATHS)) {
+  if (isAuthPath(config.url)) {
+    config.withCredentials = true
+    config.headers.set(CSRF_HEADER, '1')
     config.headers.delete('Authorization')
     return config
   }
@@ -60,17 +63,23 @@ export function attachAccessToken(
   return config
 }
 
-api.interceptors.request.use(attachAccessToken)
+api.interceptors.request.use(prepareRequest)
 
-/** Converts the API's token response into the client-side shape. */
-export function toAuthTokens(
+/** Converts the API's token response into the client-side session. */
+export function toSession(
   data: AuthTokensResponse,
   now: number = Date.now(),
-): AuthTokens {
+): AuthSession {
   return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: now + data.expires_in * 1000,
+    tokens: {
+      accessToken: data.access_token,
+      expiresAt: now + data.expires_in * 1000,
+    },
+    user: {
+      id: data.user.id,
+      username: data.user.username,
+      displayName: data.user.display_name,
+    },
   }
 }
 
@@ -82,44 +91,66 @@ function isClientError(error: unknown): boolean {
   return error.response.status >= 400 && error.response.status < 500
 }
 
-let refreshInFlight: Promise<AuthTokens> | null = null
+/** Runs `fn` holding a cross-tab lock, where the Web Locks API exists. */
+function withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
+  if (typeof navigator === 'undefined' || !('locks' in navigator)) {
+    return fn()
+  }
+  return navigator.locks.request(REFRESH_LOCK, fn)
+}
+
+let refreshInFlight: Promise<AuthSession> | null = null
 
 /**
- * Exchanges the stored refresh token for a new pair and stores it.
+ * Exchanges the refresh cookie for a new access token.
  *
- * Single-flight: refresh tokens are single-use, so concurrent callers share
- * one request instead of racing (the loser would otherwise be rejected and
- * sign the user out). If the server rejects the refresh token, the session
- * is cleared; on network/server errors the session is kept so a transient
- * failure doesn't sign the user out.
+ * Refresh tokens are single-use and every tab shares the same cookie, so
+ * refreshes are serialized: within a tab concurrent callers share one
+ * request, and across tabs a Web Lock makes each wait for the previous one
+ * (by then the browser holds the rotated cookie).
+ *
+ * If the server rejects the refresh, the session is cleared. On a
+ * network/server error an existing session is kept, so a transient failure
+ * doesn't sign the user out.
  */
-export function refreshSession(): Promise<AuthTokens> {
-  refreshInFlight ??= (async () => {
-    const refreshToken = getRefreshToken()
-
-    if (!refreshToken) {
-      setSession(null)
-      throw new Error('No refresh token available.')
-    }
-
+export function refreshSession(): Promise<AuthSession> {
+  refreshInFlight ??= withRefreshLock(async () => {
     try {
-      const { data } = await api.post<AuthTokensResponse>('/auth/refresh', {
-        refresh_token: refreshToken,
-      })
-      const tokens = toAuthTokens(data)
-      updateTokens(tokens)
-      return tokens
+      const { data } = await api.post<AuthTokensResponse>('/auth/refresh')
+      const session = toSession(data)
+      setSession(session)
+      return session
     } catch (error) {
       if (isClientError(error)) {
         setSession(null)
       }
       throw error
     }
-  })().finally(() => {
+  }).finally(() => {
     refreshInFlight = null
   })
 
   return refreshInFlight
+}
+
+/**
+ * Restores the session after a page load, using the refresh cookie.
+ *
+ * Only acts while the session is still "loading"; ends in "authenticated" or
+ * "unauthenticated" whatever happens.
+ */
+export async function initializeSession(): Promise<void> {
+  if (getAuthState().status !== 'loading') {
+    return
+  }
+
+  try {
+    await refreshSession()
+  } catch {
+    if (getAuthState().status === 'loading') {
+      setSession(null)
+    }
+  }
 }
 
 /** On a 401, refreshes the session once and retries the original request. */
@@ -129,8 +160,8 @@ export async function retryAfterRefresh(error: unknown): Promise<unknown> {
     error.response?.status !== 401 ||
     !error.config ||
     error.config._retriedAfterRefresh ||
-    matchesPath(error.config.url, AUTH_PATHS) ||
-    !getRefreshToken()
+    isAuthPath(error.config.url) ||
+    getAuthState().status !== 'authenticated'
   ) {
     throw error
   }

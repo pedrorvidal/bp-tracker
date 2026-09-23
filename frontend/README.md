@@ -50,32 +50,38 @@ src/
 
 Authentication follows the backend's access and refresh token model (see [`docs/api.md`](../docs/api.md#authentication-bp-trackerv1auth)).
 
-| Piece                               | Role                                                                                                                                                                                |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/lib/authStore.ts`              | Single source of truth for the session (`AuthSession`: tokens + user). Kept in memory and mirrored to `localStorage` under `bp-tracker.auth`, so a reload keeps the user signed in. |
-| `src/lib/api.ts`                    | Typed axios client (`VITE_API_URL`) plus the interceptors described below.                                                                                                          |
-| `src/lib/authApi.ts`                | `login()` and `logout()` calls to the API.                                                                                                                                          |
-| `src/context/AuthContext.tsx`       | `AuthProvider`, which reads the store with `useSyncExternalStore` and exposes `user`, `isAuthenticated`, `login()` and `logout()`.                                                  |
-| `src/hooks/useAuth.ts`              | `useAuth()`, the hook for reading the context.                                                                                                                                      |
-| `src/components/ProtectedRoute.tsx` | Redirects to `/login` when signed out, remembering the requested page. Works as a layout route (`<Outlet />`) or as a wrapper.                                                      |
-| `src/pages/Login.tsx`               | Sign-in form. Invalid credentials show "Invalid username or password."; after signing in, the user returns to the page they requested.                                              |
+### Where the tokens live
 
-### Request flow
+| Token                   | Stored in                                                                     | Readable by JavaScript?    |
+| ----------------------- | ----------------------------------------------------------------------------- | -------------------------- |
+| Refresh token (30 days) | `HttpOnly; SameSite=Strict` cookie set by the backend, sent only to `/auth/*` | **No**                     |
+| Access token (1 hour)   | Memory only (`src/lib/authStore.ts`)                                          | Yes, while the tab is open |
 
-1. **Bearer header.** Every request gets `Authorization: Bearer <access token>` when signed in, except `/auth/login` and `/auth/refresh`. The backend rejects any request that carries an expired Bearer header, so sending it there would make it impossible to sign in or refresh with a stale token.
-2. **Automatic refresh.** On a `401`, the client calls `POST /auth/refresh` with the stored refresh token and retries the request once with the new access token. Refresh tokens are single-use, so concurrent 401s share one refresh request instead of racing.
-3. **Failed refresh.** If the server rejects the refresh token, the session is cleared. `AuthProvider` re-renders and `ProtectedRoute` sends the user to `/login`. A network failure during refresh keeps the session, so a flaky connection doesn't sign anyone out.
-4. **Logout.** Logout revokes the refresh token with `POST /auth/logout`. If the access token has expired, it refreshes first and revokes the new refresh token. The local session and the TanStack Query cache are always cleared, even when the server can't be reached.
+Nothing auth-related is written to `localStorage` or `sessionStorage`. Tokens stored there by earlier versions are deleted on load. An XSS flaw could use the access token while the tab is open, but it can't steal a long-lived credential: the refresh token never reaches JavaScript.
 
-### Token storage
+### Pieces
 
-Both tokens are stored in `localStorage` so the session survives a reload. Any script running on the page can read them, so an XSS flaw would expose them. Mitigations:
+| File                                | Role                                                                                                                                              |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/authStore.ts`              | In-memory session (`AuthSession`: access token + user) and its `status` (`loading`, `authenticated`, `unauthenticated`).                          |
+| `src/lib/api.ts`                    | Typed axios client (`VITE_API_URL`), the request and response interceptors, `refreshSession()` and `initializeSession()`.                         |
+| `src/lib/authApi.ts`                | `login()` and `logout()`, and cross-tab logout via `BroadcastChannel`.                                                                            |
+| `src/context/AuthContext.tsx`       | `AuthProvider`: restores the session on mount and exposes `status`, `user`, `isAuthenticated`, `login()` and `logout()`.                          |
+| `src/hooks/useAuth.ts`              | `useAuth()`, the hook for reading the context.                                                                                                    |
+| `src/components/ProtectedRoute.tsx` | Shows a loading state while the session is being restored, then either renders the page or redirects to `/login`, remembering the requested page. |
+| `src/pages/Login.tsx`               | Sign-in form. Invalid credentials show "Invalid username or password."; after signing in, the user returns to the page they requested.            |
 
-- the access token is short-lived (1 hour);
-- refresh tokens are single-use and revoked on logout;
-- React escapes rendered output by default, so don't use `dangerouslySetInnerHTML` with untrusted data.
+### Flow
 
-Moving the refresh token to an `HttpOnly` cookie would remove this exposure, but it needs backend support.
+1. **Page load.** The access token only lives in memory, so after a reload `AuthProvider` calls `POST /auth/refresh`. The browser sends the cookie; the app never touches it. Protected pages show "Loading…" until the call returns.
+2. **Requests.** Data routes get `Authorization: Bearer <access token>`. `/auth/*` routes instead get `withCredentials: true`, which sends the cookie, and the `X-BP-Tracker-CSRF: 1` header, and never a Bearer token (the backend rejects a stale one).
+3. **Automatic refresh.** On a `401`, the client refreshes once and retries the request. Refresh tokens are single-use and every tab shares the cookie, so refreshes are serialized: within a tab, concurrent 401s share one request, and across tabs a Web Lock (`navigator.locks`) makes each tab wait for the previous refresh. Without the lock, two tabs refreshing at the same moment would sign one of them out.
+4. **Failed refresh.** If the server rejects the refresh, the session is cleared and `ProtectedRoute` sends the user to `/login`. A network failure keeps the current session, so a flaky connection doesn't sign anyone out.
+5. **Logout.** `POST /auth/logout` revokes the cookie's token and clears the cookie. The local session and the TanStack Query cache are always cleared, even when the server can't be reached, and every other open tab signs out too (via `BroadcastChannel`).
+
+### Deployment requirement
+
+`SameSite=Strict` cookies are only sent when the frontend and the API are the **same site**, meaning the same scheme and registrable domain; the port doesn't matter. For example, `app.example.com` and `api.example.com` work, and so do `localhost:5173` and `localhost:8888`. Serving the frontend and the API from unrelated domains would break refresh.
 
 ## Continuous integration
 

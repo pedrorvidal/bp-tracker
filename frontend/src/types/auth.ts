@@ -1,32 +1,46 @@
-/** Client-side view of the token pair issued by /auth/login and /auth/refresh. */
+/**
+ * The access token held in memory.
+ *
+ * The refresh token is never visible to JavaScript: the backend keeps it in
+ * an HttpOnly cookie scoped to the /auth routes.
+ */
 export interface AuthTokens {
   /** Short-lived JWT sent as "Authorization: Bearer <accessToken>". */
   accessToken: string
-  /** Opaque, single-use token exchanged for a new pair at /auth/refresh. */
-  refreshToken: string
   /** When the access token expires, in epoch milliseconds. */
   expiresAt: number
 }
 
 /** The signed-in user. */
 export interface User {
-  /** WordPress user ID, taken from the access token's "user_id" claim. */
+  /** WordPress user ID. */
   id: number
-  /** The username (or email) the user signed in with. */
+  /** WordPress login name. */
   username: string
+  displayName: string
 }
 
-/** Everything persisted for a signed-in user. */
+/** Everything known about the signed-in user's session. */
 export interface AuthSession {
   tokens: AuthTokens
   user: User
 }
 
+/**
+ * - `loading`: restoring the session from the refresh cookie on page load.
+ * - `authenticated` / `unauthenticated`: settled.
+ */
+export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated'
+
 /** Response body of POST /auth/login and POST /auth/refresh. */
 export interface AuthTokensResponse {
   access_token: string
-  refresh_token: string
   token_type: 'Bearer'
   /** Access token lifetime, in seconds. */
   expires_in: number
+  user: {
+    id: number
+    username: string
+    display_name: string
+  }
 }

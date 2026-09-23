@@ -17,8 +17,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  * WordPress core's rest_send_cors_headers() reflects any request Origin
  * with Access-Control-Allow-Credentials: true. For the bp-tracker/v1
  * namespace this class replaces that with a strict allow-list of exactly
- * one origin, BP_TRACKER_FRONTEND_ORIGIN. Other namespaces keep core's
- * default behavior.
+ * one origin, BP_TRACKER_FRONTEND_ORIGIN. Credentials are allowed for that
+ * origin only, so the frontend can send the HttpOnly refresh cookie to the
+ * auth routes. Other namespaces keep core's default behavior.
  */
 class BP_Tracker_CORS {
 
@@ -41,7 +42,7 @@ class BP_Tracker_CORS {
 	 *
 	 * @var string
 	 */
-	const ALLOWED_HEADERS = 'Authorization, Content-Type';
+	const ALLOWED_HEADERS = 'Authorization, Content-Type, ' . BP_Tracker_JWT_Auth::CSRF_HEADER;
 
 	/**
 	 * How long browsers may cache a preflight result, in seconds.
@@ -92,8 +93,8 @@ class BP_Tracker_CORS {
 	 *
 	 * Only an exact match (scheme, host and port) with the configured origin
 	 * gets Access-Control-Allow-* headers; anything else gets none, so the
-	 * browser blocks the response. Credentials are never allowed: the API
-	 * authenticates with Bearer tokens, not cookies.
+	 * browser blocks the response. Credentials are allowed for that origin
+	 * so it can send the refresh cookie; the origin is never reflected.
 	 *
 	 * @param string $origin         Request Origin header ('' when absent).
 	 * @param string $allowed_origin Configured frontend origin ('' when not configured).
@@ -110,10 +111,11 @@ class BP_Tracker_CORS {
 		}
 
 		return array(
-			'Access-Control-Allow-Origin'  => $allowed_origin,
-			'Access-Control-Allow-Methods' => self::ALLOWED_METHODS,
-			'Access-Control-Allow-Headers' => self::ALLOWED_HEADERS,
-			'Access-Control-Max-Age'       => (string) self::MAX_AGE,
+			'Access-Control-Allow-Origin'      => $allowed_origin,
+			'Access-Control-Allow-Methods'     => self::ALLOWED_METHODS,
+			'Access-Control-Allow-Headers'     => self::ALLOWED_HEADERS,
+			'Access-Control-Allow-Credentials' => 'true',
+			'Access-Control-Max-Age'           => (string) self::MAX_AGE,
 		) + $headers;
 	}
 

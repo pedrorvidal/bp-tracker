@@ -1,7 +1,9 @@
 import { createContext } from 'react'
-import type { User } from '../types'
+import type { AuthStatus, User } from '../types'
 
 export interface AuthContextValue {
+  /** "loading" while the session is being restored after a page load. */
+  status: AuthStatus
   user: User | null
   isAuthenticated: boolean
   /** Rejects with the API error when the credentials are invalid. */

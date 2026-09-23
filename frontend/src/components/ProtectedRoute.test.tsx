@@ -1,32 +1,40 @@
 import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Route, Routes } from 'react-router-dom'
+import { Route, Routes, useLocation } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { api } from '../lib/api'
-import { setSession } from '../lib/authStore'
+import { resetAuthStore, setSession } from '../lib/authStore'
 import Login from '../pages/Login'
 import { makeSession, makeTokensResponse } from '../test/fixtures'
-import { mockApi, restError } from '../test/mockApi'
+import { deferredReply, mockApi, restError } from '../test/mockApi'
 import { renderWithProviders } from '../test/renderWithProviders'
 import ProtectedRoute from './ProtectedRoute'
 
+/** Exposes the current URL path, to catch redirects that happen and revert. */
+function LocationProbe() {
+  return <span data-testid="path">{useLocation().pathname}</span>
+}
+
 function renderRoutes(route: string) {
   return renderWithProviders(
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route element={<ProtectedRoute />}>
-        <Route path="/" element={<h1>Home page</h1>} />
-        <Route path="/history" element={<h1>History page</h1>} />
-      </Route>
-      <Route
-        path="/settings"
-        element={
-          <ProtectedRoute>
-            <h1>Settings page</h1>
-          </ProtectedRoute>
-        }
-      />
-    </Routes>,
+    <>
+      <LocationProbe />
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route element={<ProtectedRoute />}>
+          <Route path="/" element={<h1>Home page</h1>} />
+          <Route path="/history" element={<h1>History page</h1>} />
+        </Route>
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <h1>Settings page</h1>
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </>,
     { route },
   )
 }
@@ -48,6 +56,40 @@ describe('ProtectedRoute', () => {
     expect(
       screen.queryByRole('heading', { name: 'Settings page' }),
     ).not.toBeInTheDocument()
+  })
+
+  it('waits for the session to be restored instead of redirecting', async () => {
+    resetAuthStore()
+    const pending = deferredReply()
+    mockApi({
+      'POST /auth/refresh': pending.handler,
+    })
+    renderRoutes('/history')
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading…')
+    expect(screen.getByTestId('path')).toHaveTextContent('/history')
+
+    pending.resolve({ status: 200, data: makeTokensResponse('a') })
+
+    expect(
+      await screen.findByRole('heading', { name: 'History page' }),
+    ).toBeInTheDocument()
+  })
+
+  it('redirects once the restore finds no session', async () => {
+    resetAuthStore()
+    mockApi({
+      'POST /auth/refresh': restError(
+        'bp_tracker_jwt_invalid_refresh_token',
+        'Invalid or expired refresh token.',
+        401,
+      ),
+    })
+    renderRoutes('/history')
+
+    expect(
+      await screen.findByRole('heading', { name: 'Sign in' }),
+    ).toBeInTheDocument()
   })
 
   it('renders the protected page when authenticated', () => {

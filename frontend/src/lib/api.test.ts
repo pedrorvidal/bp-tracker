@@ -2,8 +2,21 @@ import { AxiosError, AxiosHeaders } from 'axios'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeSession, makeTokensResponse } from '../test/fixtures'
 import { mockApi, restError } from '../test/mockApi'
-import { DEFAULT_API_URL, api, isApiError, toAuthTokens } from './api'
-import { getSession, setSession } from './authStore'
+import {
+  DEFAULT_API_URL,
+  REFRESH_LOCK,
+  api,
+  initializeSession,
+  isApiError,
+  refreshSession,
+  toSession,
+} from './api'
+import {
+  getAuthState,
+  getSession,
+  resetAuthStore,
+  setSession,
+} from './authStore'
 
 const expired = restError(
   'bp_tracker_jwt_invalid_token',
@@ -18,20 +31,22 @@ const refreshRejected = restError(
 
 afterEach(() => {
   vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
   vi.resetModules()
 })
 
-describe('Authorization header', () => {
-  it('sends "Authorization: Bearer <access token>" when signed in', async () => {
-    const session = makeSession('a')
-    setSession(session)
+describe('request preparation', () => {
+  it('sends "Authorization: Bearer <access token>" to data routes when signed in', async () => {
+    setSession(makeSession('a'))
     const http = mockApi({ 'GET /readings': { status: 200, data: [] } })
 
     await api.get('/readings')
 
-    expect(http.calls[0]?.authorization).toBe(
-      `Bearer ${session.tokens.accessToken}`,
-    )
+    expect(http.calls[0]).toMatchObject({
+      authorization: 'Bearer access-a',
+      csrf: undefined,
+      withCredentials: false,
+    })
   })
 
   it('sends no Authorization header when signed out', async () => {
@@ -42,90 +57,167 @@ describe('Authorization header', () => {
     expect(http.calls[0]?.authorization).toBeUndefined()
   })
 
-  it.each(['/auth/login', '/auth/refresh'])(
-    'never sends it to %s, even when signed in (a stale token would get the call rejected)',
+  it.each(['/auth/login', '/auth/refresh', '/auth/logout'])(
+    '%s: sends the refresh cookie and CSRF header, never a Bearer token',
     async (path) => {
       setSession(makeSession('a'))
       const http = mockApi({ [`POST ${path}`]: { status: 200, data: {} } })
 
       await api.post(path, {})
 
-      expect(http.calls[0]?.authorization).toBeUndefined()
+      expect(http.calls[0]).toMatchObject({
+        authorization: undefined,
+        csrf: '1',
+        withCredentials: true,
+      })
     },
   )
-
-  it('sends it to /auth/logout, which requires authentication', async () => {
-    const session = makeSession('a')
-    setSession(session)
-    const http = mockApi({ 'POST /auth/logout': { status: 200, data: {} } })
-
-    await api.post('/auth/logout', {})
-
-    expect(http.calls[0]?.authorization).toBe(
-      `Bearer ${session.tokens.accessToken}`,
-    )
-  })
 
   it('uses the token current at request time, not at client creation', async () => {
     const http = mockApi({ 'GET /readings': { status: 200, data: [] } })
 
     await api.get('/readings')
-    const session = makeSession('b')
-    setSession(session)
+    setSession(makeSession('b'))
     await api.get('/readings')
 
     expect(http.calls[0]?.authorization).toBeUndefined()
-    expect(http.calls[1]?.authorization).toBe(
-      `Bearer ${session.tokens.accessToken}`,
-    )
+    expect(http.calls[1]?.authorization).toBe('Bearer access-b')
   })
 })
 
-describe('toAuthTokens', () => {
+describe('toSession', () => {
   it('maps the API response and computes expiresAt from expires_in', () => {
-    const response = makeTokensResponse('x')
-
-    expect(toAuthTokens(response, 1_000)).toEqual({
-      accessToken: response.access_token,
-      refreshToken: 'refresh-x',
-      expiresAt: 1_000 + 3_600_000,
+    expect(toSession(makeTokensResponse('x', 9), 1_000)).toEqual({
+      tokens: { accessToken: 'access-x', expiresAt: 1_000 + 3_600_000 },
+      user: { id: 9, username: 'admin', displayName: 'Ada Admin' },
     })
+  })
+})
+
+describe('refreshSession', () => {
+  it('posts to /auth/refresh without a body and stores the new session', async () => {
+    const http = mockApi({
+      'POST /auth/refresh': { status: 200, data: makeTokensResponse('new', 4) },
+    })
+
+    const session = await refreshSession()
+
+    expect(http.calls[0]?.body).toBeUndefined()
+    expect(session.tokens.accessToken).toBe('access-new')
+    expect(getAuthState()).toEqual({ status: 'authenticated', session })
+  })
+
+  it('shares one request between concurrent callers', async () => {
+    const http = mockApi({
+      'POST /auth/refresh': async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        return { status: 200, data: makeTokensResponse('new') }
+      },
+    })
+
+    await Promise.all([refreshSession(), refreshSession(), refreshSession()])
+
+    expect(http.calls).toHaveLength(1)
+  })
+
+  it('holds the cross-tab Web Lock while refreshing', async () => {
+    const request = vi.fn((_name: string, callback: () => Promise<unknown>) =>
+      callback(),
+    )
+    vi.stubGlobal('navigator', { ...navigator, locks: { request } })
+    mockApi({
+      'POST /auth/refresh': { status: 200, data: makeTokensResponse('new') },
+    })
+
+    await refreshSession()
+
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(request.mock.calls[0]?.[0]).toBe(REFRESH_LOCK)
+  })
+
+  it('signs out when the server rejects the refresh cookie', async () => {
+    setSession(makeSession('old'))
+    mockApi({ 'POST /auth/refresh': refreshRejected })
+
+    await expect(refreshSession()).rejects.toBeInstanceOf(AxiosError)
+    expect(getAuthState()).toEqual({ status: 'unauthenticated', session: null })
+  })
+
+  it('keeps the session on a network error', async () => {
+    setSession(makeSession('old'))
+    mockApi({ 'POST /auth/refresh': 'network-error' })
+
+    await expect(refreshSession()).rejects.toBeInstanceOf(AxiosError)
+    expect(getSession()?.tokens.accessToken).toBe('access-old')
+  })
+})
+
+describe('initializeSession (page load)', () => {
+  it('restores the session from the refresh cookie', async () => {
+    resetAuthStore()
+    mockApi({
+      'POST /auth/refresh': { status: 200, data: makeTokensResponse('a', 2) },
+    })
+
+    await initializeSession()
+
+    expect(getAuthState().status).toBe('authenticated')
+    expect(getSession()?.user).toEqual({
+      id: 2,
+      username: 'admin',
+      displayName: 'Ada Admin',
+    })
+  })
+
+  it.each([
+    ['no valid refresh cookie', refreshRejected],
+    ['a network error', 'network-error' as const],
+    ['a server error', restError('internal', 'Boom.', 500)],
+  ])('ends signed out after %s, never stuck loading', async (_label, reply) => {
+    resetAuthStore()
+    mockApi({ 'POST /auth/refresh': reply })
+
+    await initializeSession()
+
+    expect(getAuthState()).toEqual({ status: 'unauthenticated', session: null })
+  })
+
+  it('makes one request when called twice at once (StrictMode effects)', async () => {
+    resetAuthStore()
+    const http = mockApi({
+      'POST /auth/refresh': { status: 200, data: makeTokensResponse('a') },
+    })
+
+    await Promise.all([initializeSession(), initializeSession()])
+
+    expect(http.calls).toHaveLength(1)
+  })
+
+  it('does nothing once the session is settled', async () => {
+    setSession(makeSession('a'))
+    const http = mockApi({})
+
+    await initializeSession()
+
+    expect(http.calls).toHaveLength(0)
   })
 })
 
 describe('automatic refresh on 401', () => {
   it('refreshes once and retries the request with the new access token', async () => {
     setSession(makeSession('old'))
-    const rotated = makeTokensResponse('new')
     const http = mockApi({
       'GET /readings': [expired, { status: 200, data: ['ok'] }],
-      'POST /auth/refresh': { status: 200, data: rotated },
+      'POST /auth/refresh': { status: 200, data: makeTokensResponse('new') },
     })
 
     const response = await api.get('/readings')
 
     expect(response.data).toEqual(['ok'])
     expect(http.callsTo('POST /auth/refresh')).toHaveLength(1)
-    expect(http.callsTo('POST /auth/refresh')[0]?.body).toEqual({
-      refresh_token: 'refresh-old',
-    })
     expect(http.callsTo('GET /readings')[1]?.authorization).toBe(
-      `Bearer ${rotated.access_token}`,
+      'Bearer access-new',
     )
-  })
-
-  it('stores the rotated token pair and keeps the user', async () => {
-    const session = makeSession('old')
-    setSession(session)
-    mockApi({
-      'GET /readings': [expired, { status: 200, data: [] }],
-      'POST /auth/refresh': { status: 200, data: makeTokensResponse('new') },
-    })
-
-    await api.get('/readings')
-
-    expect(getSession()?.tokens.refreshToken).toBe('refresh-new')
-    expect(getSession()?.user).toEqual(session.user)
   })
 
   it('shares one refresh between concurrent 401s (refresh tokens are single-use)', async () => {
@@ -147,7 +239,7 @@ describe('automatic refresh on 401', () => {
     expect(http.callsTo('POST /auth/refresh')).toHaveLength(1)
   })
 
-  it('signs out and rejects when the refresh token is rejected', async () => {
+  it('signs out and rejects when the refresh is rejected', async () => {
     setSession(makeSession('old'))
     const http = mockApi({
       'GET /readings': expired,
@@ -169,7 +261,7 @@ describe('automatic refresh on 401', () => {
     })
 
     await expect(api.get('/readings')).rejects.toBeInstanceOf(AxiosError)
-    expect(getSession()?.tokens.refreshToken).toBe('refresh-old')
+    expect(getSession()?.tokens.accessToken).toBe('access-old')
   })
 
   it('does not loop when the retried request is rejected again', async () => {
@@ -195,9 +287,7 @@ describe('automatic refresh on 401', () => {
       const http = mockApi({ [`POST ${path}`]: expired })
 
       await expect(api.post(path, {})).rejects.toBeInstanceOf(AxiosError)
-      expect(http.callsTo('POST /auth/refresh')).toHaveLength(
-        path === '/auth/refresh' ? 1 : 0,
-      )
+      expect(http.calls).toHaveLength(1)
     },
   )
 

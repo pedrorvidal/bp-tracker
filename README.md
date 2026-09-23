@@ -104,7 +104,7 @@ The frontend's origin: scheme, host and port, with no trailing slash. It is the 
 define( 'BP_TRACKER_FRONTEND_ORIGIN', 'http://localhost:5173' );
 ```
 
-For this namespace, the plugin (`BP_Tracker_CORS`) replaces WordPress core's default CORS behavior. By default, core reflects any origin with credentials allowed. Only an exact match on scheme, host and port gets `Access-Control-Allow-*` headers, so `http://localhost:5174` or `https://localhost:5173` are rejected. Credentials (cookies) are never allowed, because the API authenticates with Bearer tokens. Other namespaces such as `wp/v2` keep core's behavior.
+For this namespace, the plugin (`BP_Tracker_CORS`) replaces WordPress core's default CORS behavior. By default, core reflects any origin with credentials allowed. Only an exact match on scheme, host and port gets `Access-Control-Allow-*` headers, so `http://localhost:5174` or `https://localhost:5173` are rejected. Credentials are allowed for that exact origin only, so the frontend can send the `HttpOnly` refresh cookie to `/auth/*`. Other namespaces such as `wp/v2` keep core's behavior.
 
 If the constant is left undefined, no origin is allowed. Same-origin requests and non-browser clients such as `curl` still work, but cross-origin browser requests are blocked. The frontend's dev server is pinned to port `5173` for this reason (see `frontend/vite.config.ts`).
 
@@ -129,4 +129,10 @@ The test site doesn't need this file, because `backend/tests/bootstrap.php` defi
 
 See [`docs/api.md`](docs/api.md) for the full request/response reference and `curl` examples for `login`, `refresh` and `logout`.
 
-The frontend signs in with these endpoints, refreshes the access token automatically on a `401`, and sends signed-out users to `/login`. See [`frontend/README.md`](frontend/README.md#authentication) for the details and the token storage trade-offs.
+In short:
+
+- the refresh token lives only in an `HttpOnly; SameSite=Strict` cookie scoped to `/auth/*`, which JavaScript can't read;
+- the access token lives in memory;
+- the `/auth/*` routes require an `X-BP-Tracker-CSRF: 1` header.
+
+The frontend restores the session on page load from that cookie, refreshes automatically on a `401`, and sends signed-out users to `/login`. See [`frontend/README.md`](frontend/README.md#authentication) for the details, including the requirement that the frontend and the API share a site.

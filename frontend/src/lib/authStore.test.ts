@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeSession } from '../test/fixtures'
 import {
-  AUTH_STORAGE_KEY,
+  LEGACY_STORAGE_KEY,
   getAccessToken,
-  getRefreshToken,
+  getAuthState,
   getSession,
+  resetAuthStore,
   setSession,
   subscribe,
-  updateTokens,
 } from './authStore'
 
 afterEach(() => {
@@ -15,82 +15,73 @@ afterEach(() => {
   vi.resetModules()
 })
 
-/** Loads a fresh copy of the store, as on a page reload. */
-async function reloadStore() {
-  vi.resetModules()
-  return import('./authStore')
-}
-
 describe('authStore', () => {
-  it('starts signed out when nothing is stored', () => {
-    expect(getSession()).toBeNull()
-    expect(getAccessToken()).toBeNull()
-    expect(getRefreshToken()).toBeNull()
+  it('starts in "loading" until the session is restored', async () => {
+    vi.resetModules()
+    const fresh = await import('./authStore')
+
+    expect(fresh.getAuthState()).toEqual({ status: 'loading', session: null })
   })
 
-  it('exposes the tokens of the current session', () => {
+  it('becomes authenticated with a session and unauthenticated without', () => {
     const session = makeSession('a')
-    setSession(session)
 
+    setSession(session)
+    expect(getAuthState()).toEqual({ status: 'authenticated', session })
     expect(getSession()).toEqual(session)
-    expect(getAccessToken()).toBe(session.tokens.accessToken)
-    expect(getRefreshToken()).toBe('refresh-a')
-  })
-
-  it('persists the session to localStorage and clears it on sign-out', () => {
-    const session = makeSession('a')
-
-    setSession(session)
-    expect(
-      JSON.parse(window.localStorage.getItem(AUTH_STORAGE_KEY) ?? 'null'),
-    ).toEqual(session)
+    expect(getAccessToken()).toBe('access-a')
 
     setSession(null)
-    expect(window.localStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
+    expect(getAuthState()).toEqual({ status: 'unauthenticated', session: null })
+    expect(getAccessToken()).toBeNull()
   })
 
-  it('restores a persisted session after a reload', async () => {
-    const session = makeSession('a')
-    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session))
+  it('resetAuthStore goes back to "loading"', () => {
+    setSession(makeSession('a'))
 
-    const store = await reloadStore()
+    resetAuthStore()
 
-    expect(store.getSession()).toEqual(session)
-    expect(store.getRefreshToken()).toBe('refresh-a')
+    expect(getAuthState()).toEqual({ status: 'loading', session: null })
   })
 
-  it.each([
-    ['corrupted JSON', '{not json'],
-    ['wrong shape', JSON.stringify({ accessToken: 'x' })],
-    [
-      'wrong field types',
-      JSON.stringify({
-        tokens: { accessToken: 1, refreshToken: 'r', expiresAt: 0 },
-        user: { id: 1, username: 'a' },
-      }),
-    ],
-    ['null', 'null'],
-  ])('ignores %s in storage', async (_label, raw) => {
-    window.localStorage.setItem(AUTH_STORAGE_KEY, raw)
+  it('never writes tokens to web storage', () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem')
 
-    const store = await reloadStore()
+    setSession(makeSession('a'))
+    setSession(makeSession('b'))
 
-    expect(store.getSession()).toBeNull()
+    expect(setItem).not.toHaveBeenCalled()
+    expect(window.localStorage.length).toBe(0)
+    expect(window.sessionStorage.length).toBe(0)
   })
 
-  it('keeps working in memory when localStorage throws', async () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+  it('purges tokens left in localStorage by earlier versions', async () => {
+    window.localStorage.setItem(
+      LEGACY_STORAGE_KEY,
+      JSON.stringify({ tokens: { refreshToken: 'old-refresh' } }),
+    )
+
+    vi.resetModules()
+    await import('./authStore')
+
+    expect(window.localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull()
+  })
+
+  it('loads even when localStorage throws', async () => {
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
       throw new Error('SecurityError')
     })
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('QuotaExceededError')
-    })
-    const store = await reloadStore()
-    const session = makeSession('a')
 
-    expect(store.getSession()).toBeNull()
-    store.setSession(session)
-    expect(store.getSession()).toEqual(session)
+    vi.resetModules()
+    const fresh = await import('./authStore')
+
+    expect(fresh.getAuthState().status).toBe('loading')
+  })
+
+  it('keeps the same state object until it changes (useSyncExternalStore contract)', () => {
+    setSession(makeSession('a'))
+
+    expect(getAuthState()).toBe(getAuthState())
   })
 
   it('notifies subscribers on every change until they unsubscribe', () => {
@@ -103,21 +94,5 @@ describe('authStore', () => {
     setSession(makeSession('b'))
 
     expect(listener).toHaveBeenCalledTimes(2)
-  })
-
-  it('updateTokens replaces the tokens and keeps the user', () => {
-    const session = makeSession('a', 7)
-    setSession(session)
-    const tokens = makeSession('b').tokens
-
-    updateTokens(tokens)
-
-    expect(getSession()).toEqual({ tokens, user: session.user })
-  })
-
-  it('updateTokens does nothing when signed out', () => {
-    updateTokens(makeSession('b').tokens)
-
-    expect(getSession()).toBeNull()
   })
 })

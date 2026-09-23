@@ -41,6 +41,25 @@ class BP_Tracker_JWT_Auth {
 	const REFRESH_TOKEN_TTL = 30 * DAY_IN_SECONDS;
 
 	/**
+	 * Name of the HttpOnly cookie carrying the refresh token.
+	 *
+	 * @var string
+	 */
+	const REFRESH_COOKIE = 'bp_tracker_refresh';
+
+	/**
+	 * Request header every auth route requires (value "1").
+	 *
+	 * The refresh cookie is sent by the browser automatically, so a custom
+	 * header is required to prove the request came from our own frontend:
+	 * browsers only send custom headers cross-origin after a CORS preflight,
+	 * which BP_Tracker_CORS only grants to the configured frontend origin.
+	 *
+	 * @var string
+	 */
+	const CSRF_HEADER = 'X-BP-Tracker-CSRF';
+
+	/**
 	 * Bump whenever create_tables()'s schema changes, so maybe_upgrade()
 	 * re-runs it for sites where the plugin was already active.
 	 *
@@ -125,7 +144,7 @@ class BP_Tracker_JWT_Auth {
 			array(
 				'methods'             => WP_REST_Server::CREATABLE,
 				'callback'            => array( __CLASS__, 'handle_login' ),
-				'permission_callback' => '__return_true',
+				'permission_callback' => array( __CLASS__, 'require_csrf_header' ),
 				'args'                => array(
 					'username' => array(
 						'required' => true,
@@ -145,13 +164,7 @@ class BP_Tracker_JWT_Auth {
 			array(
 				'methods'             => WP_REST_Server::CREATABLE,
 				'callback'            => array( __CLASS__, 'handle_refresh' ),
-				'permission_callback' => '__return_true',
-				'args'                => array(
-					'refresh_token' => array(
-						'required' => true,
-						'type'     => 'string',
-					),
-				),
+				'permission_callback' => array( __CLASS__, 'require_csrf_header' ),
 			)
 		);
 
@@ -161,13 +174,7 @@ class BP_Tracker_JWT_Auth {
 			array(
 				'methods'             => WP_REST_Server::CREATABLE,
 				'callback'            => array( __CLASS__, 'handle_logout' ),
-				'permission_callback' => array( __CLASS__, 'require_logged_in' ),
-				'args'                => array(
-					'refresh_token' => array(
-						'required' => true,
-						'type'     => 'string',
-					),
-				),
+				'permission_callback' => array( __CLASS__, 'require_csrf_header' ),
 			)
 		);
 	}
@@ -193,94 +200,207 @@ class BP_Tracker_JWT_Auth {
 		}
 
 		try {
-			return new WP_REST_Response( self::issue_tokens( $user->ID ), 200 );
+			return self::token_response( $user );
 		} catch ( RuntimeException $e ) {
 			return self::misconfigured_error();
 		}
 	}
 
 	/**
-	 * Handles POST /auth/refresh.
+	 * Handles POST /auth/refresh: exchanges the refresh cookie for a new pair.
 	 *
-	 * @param WP_REST_Request $request Current request.
+	 * The presented refresh token is deleted (rotation), so each one works once.
+	 *
 	 * @return WP_REST_Response|WP_Error
 	 */
-	public static function handle_refresh( WP_REST_Request $request ): WP_REST_Response|WP_Error {
-		$refresh_token = (string) $request->get_param( 'refresh_token' );
-		$row           = self::find_valid_refresh_token( $refresh_token );
+	public static function handle_refresh(): WP_REST_Response|WP_Error {
+		$refresh_token = self::get_refresh_cookie();
+		$row           = null === $refresh_token ? null : self::find_valid_refresh_token( $refresh_token );
+		$user          = null === $row ? false : get_userdata( (int) $row->user_id );
 
-		if ( null === $row ) {
-			return new WP_Error(
-				'bp_tracker_jwt_invalid_refresh_token',
-				__( 'Invalid or expired refresh token.', 'bp-tracker' ),
-				array( 'status' => 401 )
+		if ( null === $row || false === $user ) {
+			return self::invalid_refresh_response();
+		}
+
+		// Consume the token atomically: of several concurrent requests presenting
+		// the same token, only the one whose DELETE removes the row may proceed.
+		// Checking the SELECT above alone would let them all through.
+		global $wpdb;
+		$consumed = $wpdb->delete( self::table_name(), array( 'id' => $row->id ), array( '%d' ) );
+
+		if ( 1 !== $consumed ) {
+			return self::invalid_refresh_response();
+		}
+
+		try {
+			return self::token_response( $user );
+		} catch ( RuntimeException $e ) {
+			return self::misconfigured_error();
+		}
+	}
+
+	/**
+	 * Builds the 401 for an unusable refresh token, clearing the stale cookie
+	 * so the browser stops sending it.
+	 *
+	 * @return WP_REST_Response
+	 */
+	private static function invalid_refresh_response(): WP_REST_Response {
+		$response = new WP_REST_Response(
+			array(
+				'code'    => 'bp_tracker_jwt_invalid_refresh_token',
+				'message' => __( 'Invalid or expired refresh token.', 'bp-tracker' ),
+				'data'    => array( 'status' => 401 ),
+			),
+			401
+		);
+		$response->header( 'Set-Cookie', self::build_refresh_cookie( '', 0 ) );
+
+		return $response;
+	}
+
+	/**
+	 * Handles POST /auth/logout: revokes the refresh cookie and clears it.
+	 *
+	 * Needs no access token: holding the refresh token proves the right to
+	 * revoke it, and logout must work even after the access token expired.
+	 *
+	 * @return WP_REST_Response
+	 */
+	public static function handle_logout(): WP_REST_Response {
+		$refresh_token = self::get_refresh_cookie();
+
+		if ( null !== $refresh_token ) {
+			global $wpdb;
+			$wpdb->delete(
+				self::table_name(),
+				array( 'token_hash' => self::hash_token( $refresh_token ) ),
+				array( '%s' )
 			);
 		}
 
-		global $wpdb;
-		$wpdb->delete( self::table_name(), array( 'id' => $row->id ), array( '%d' ) );
+		$response = new WP_REST_Response( array( 'success' => true ), 200 );
+		$response->header( 'Set-Cookie', self::build_refresh_cookie( '', 0 ) );
 
-		try {
-			return new WP_REST_Response( self::issue_tokens( (int) $row->user_id ), 200 );
-		} catch ( RuntimeException $e ) {
-			return self::misconfigured_error();
-		}
+		return $response;
 	}
 
 	/**
-	 * Handles POST /auth/logout.
+	 * Permission callback for the auth routes: requires the CSRF header.
 	 *
 	 * @param WP_REST_Request $request Current request.
-	 * @return WP_REST_Response
-	 */
-	public static function handle_logout( WP_REST_Request $request ): WP_REST_Response {
-		$refresh_token = (string) $request->get_param( 'refresh_token' );
-
-		global $wpdb;
-		$wpdb->delete(
-			self::table_name(),
-			array(
-				'token_hash' => self::hash_token( $refresh_token ),
-				'user_id'    => get_current_user_id(),
-			),
-			array( '%s', '%d' )
-		);
-
-		return new WP_REST_Response( array( 'success' => true ), 200 );
-	}
-
-	/**
-	 * Permission callback requiring an authenticated user.
-	 *
 	 * @return true|WP_Error
 	 */
-	public static function require_logged_in(): true|WP_Error {
-		if ( is_user_logged_in() ) {
+	public static function require_csrf_header( WP_REST_Request $request ): true|WP_Error {
+		if ( '1' === $request->get_header( self::CSRF_HEADER ) ) {
 			return true;
 		}
 
 		return new WP_Error(
-			'bp_tracker_jwt_unauthorized',
-			__( 'Authentication required.', 'bp-tracker' ),
-			array( 'status' => 401 )
+			'bp_tracker_jwt_missing_csrf_header',
+			/* translators: %s: header name. */
+			sprintf( __( 'Missing the %s header.', 'bp-tracker' ), self::CSRF_HEADER ),
+			array( 'status' => 403 )
 		);
 	}
 
 	/**
-	 * Issues a fresh access/refresh token pair for a user.
+	 * Builds the Set-Cookie header value for the refresh token.
 	 *
-	 * @param int $user_id User ID to issue tokens for.
-	 * @return array{access_token: string, refresh_token: string, token_type: string, expires_in: int}
+	 * HttpOnly keeps it away from JavaScript (and so from XSS); SameSite=Strict
+	 * keeps other sites from sending it; the path limits it to the auth routes;
+	 * Secure is set whenever the site is served over HTTPS.
+	 *
+	 * @param string $value   Raw refresh token, or '' to clear the cookie.
+	 * @param int    $max_age Lifetime in seconds; 0 deletes the cookie.
+	 * @return string
+	 */
+	public static function build_refresh_cookie( string $value, int $max_age ): string {
+		$attributes = array(
+			self::REFRESH_COOKIE . '=' . rawurlencode( $value ),
+			'Path=' . self::cookie_path(),
+			'Max-Age=' . max( 0, $max_age ),
+			'HttpOnly',
+			'SameSite=Strict',
+		);
+
+		/**
+		 * Filters whether the refresh cookie gets the Secure attribute.
+		 *
+		 * Defaults to is_ssl(). Return true when TLS is terminated by a proxy
+		 * that WordPress doesn't detect.
+		 *
+		 * @param bool $secure Whether to mark the cookie Secure.
+		 */
+		if ( (bool) apply_filters( 'bp_tracker_refresh_cookie_secure', is_ssl() ) ) {
+			$attributes[] = 'Secure';
+		}
+
+		return implode( '; ', $attributes );
+	}
+
+	/**
+	 * Path the refresh cookie is scoped to: this namespace's auth routes.
+	 *
+	 * @return string
+	 */
+	private static function cookie_path(): string {
+		$path = wp_parse_url( rest_url( self::REST_NAMESPACE . '/auth' ), PHP_URL_PATH );
+
+		// Plain permalinks route the REST API through "/?rest_route=".
+		if ( ! is_string( $path ) || ! str_contains( $path, self::REST_NAMESPACE ) ) {
+			return '/';
+		}
+
+		return untrailingslashit( $path );
+	}
+
+	/**
+	 * Reads a well-formed refresh token from the request cookie.
+	 *
+	 * @return string|null
+	 */
+	private static function get_refresh_cookie(): ?string {
+		if ( ! isset( $_COOKIE[ self::REFRESH_COOKIE ] ) || ! is_string( $_COOKIE[ self::REFRESH_COOKIE ] ) ) {
+			return null;
+		}
+
+		$token = sanitize_text_field( wp_unslash( $_COOKIE[ self::REFRESH_COOKIE ] ) );
+
+		// Tokens are 32 random bytes, hex-encoded.
+		return 1 === preg_match( '/^[0-9a-f]{64}$/', $token ) ? $token : null;
+	}
+
+	/**
+	 * Issues a fresh token pair for a user: the access token in the body,
+	 * the refresh token in the HttpOnly cookie.
+	 *
+	 * @param WP_User $user User to issue tokens for.
+	 * @return WP_REST_Response
 	 *
 	 * @throws RuntimeException When BP_TRACKER_JWT_SECRET is not configured.
 	 */
-	private static function issue_tokens( int $user_id ): array {
-		return array(
-			'access_token'  => self::create_access_token( $user_id ),
-			'refresh_token' => self::create_refresh_token( $user_id ),
-			'token_type'    => 'Bearer',
-			'expires_in'    => self::ACCESS_TOKEN_TTL,
+	private static function token_response( WP_User $user ): WP_REST_Response {
+		$response = new WP_REST_Response(
+			array(
+				'access_token' => self::create_access_token( $user->ID ),
+				'token_type'   => 'Bearer',
+				'expires_in'   => self::ACCESS_TOKEN_TTL,
+				'user'         => array(
+					'id'           => $user->ID,
+					'username'     => $user->user_login,
+					'display_name' => $user->display_name,
+				),
+			),
+			200
 		);
+
+		$response->header(
+			'Set-Cookie',
+			self::build_refresh_cookie( self::create_refresh_token( $user->ID ), self::REFRESH_TOKEN_TTL )
+		);
+
+		return $response;
 	}
 
 	/**

@@ -35,7 +35,7 @@ describe('App', () => {
     renderWithProviders(<App />)
 
     expect(
-      screen.getByRole('heading', { level: 2, name: 'Welcome, admin' }),
+      screen.getByRole('heading', { level: 2, name: 'Welcome, Ada Admin' }),
     ).toBeInTheDocument()
   })
 
@@ -45,7 +45,7 @@ describe('App', () => {
     renderWithProviders(<App />, { route: '/does-not-exist' })
 
     expect(
-      screen.getByRole('heading', { level: 2, name: 'Welcome, admin' }),
+      screen.getByRole('heading', { level: 2, name: 'Welcome, Ada Admin' }),
     ).toBeInTheDocument()
   })
 
