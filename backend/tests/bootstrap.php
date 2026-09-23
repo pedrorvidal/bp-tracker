@@ -31,6 +31,12 @@ function bp_tracker_tests_load_plugin(): void {
 	require dirname( __DIR__ ) . '/bp-tracker.php';
 
 	BP_Tracker_JWT_Auth::create_tables();
+
+	// WordPress' test installer doesn't reset plugin tables, so rows left by
+	// an interrupted run (or anything that escaped a test's rollback) would
+	// leak into this one. Start every run from an empty table.
+	global $wpdb;
+	$wpdb->query( 'TRUNCATE TABLE ' . BP_Tracker_JWT_Auth::table_name() ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery.SchemaChange -- our own table name; test bootstrap only.
 }
 tests_add_filter( 'muplugins_loaded', 'bp_tracker_tests_load_plugin' );
 

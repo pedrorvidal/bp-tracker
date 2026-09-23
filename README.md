@@ -136,6 +136,7 @@ In short:
 - the `/auth/*` routes require an `X-BP-Tracker-CSRF: 1` header;
 - failed logins are rate limited, per account + IP, per IP and per account, and the response is `429` with a wait time;
 - changing the password, or "sign out of all devices" (`POST /auth/logout-all`), revokes every session of the user immediately;
+- reusing a refresh token that was already used (a sign of theft) revokes that whole session, including the thief's copy;
 - expired refresh tokens are purged daily by WP-Cron.
 
 The frontend restores the session on page load from that cookie, refreshes automatically on a `401`, and sends signed-out users to `/login`. See [`frontend/README.md`](frontend/README.md#authentication) for the details, including the requirement that the frontend and the API share a site.

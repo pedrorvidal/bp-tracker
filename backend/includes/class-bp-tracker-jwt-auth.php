@@ -68,7 +68,7 @@ class BP_Tracker_JWT_Auth {
 	 *
 	 * @var string
 	 */
-	const DB_VERSION = '1.0.0';
+	const DB_VERSION = '1.1.0';
 
 	/**
 	 * Option storing the refresh token table's currently installed schema version.
@@ -109,7 +109,22 @@ class BP_Tracker_JWT_Auth {
 		}
 
 		self::create_tables();
+		self::backfill_family_ids();
 		update_option( self::DB_VERSION_OPTION, self::DB_VERSION );
+	}
+
+	/**
+	 * Gives every refresh token created before families existed (schema
+	 * 1.0.0) a family of its own, so no two legacy sessions share one and a
+	 * revocation never spreads across them.
+	 */
+	private static function backfill_family_ids(): void {
+		global $wpdb;
+
+		$table = self::table_name();
+
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.SchemaChange -- $table is our own prefixed table name; one-off data migration, not a schema change.
+		$wpdb->query( "UPDATE {$table} SET family_id = MD5( CONCAT( id, '-', token_hash ) ) WHERE family_id = ''" );
 	}
 
 	/**
@@ -124,14 +139,17 @@ class BP_Tracker_JWT_Auth {
 		$charset_collate = $wpdb->get_charset_collate();
 
 		$sql = "CREATE TABLE {$table_name} (
-			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-			user_id BIGINT UNSIGNED NOT NULL,
+			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+			user_id bigint(20) unsigned NOT NULL,
+			family_id CHAR(32) NOT NULL DEFAULT '',
 			token_hash CHAR(64) NOT NULL,
 			expires_at DATETIME NOT NULL,
+			used_at DATETIME NULL DEFAULT NULL,
 			created_at DATETIME NOT NULL,
 			PRIMARY KEY  (id),
 			UNIQUE KEY token_hash (token_hash),
-			KEY user_id (user_id)
+			KEY user_id (user_id),
+			KEY family_id (family_id)
 		) {$charset_collate};";
 
 		dbDelta( $sql );
@@ -235,34 +253,111 @@ class BP_Tracker_JWT_Auth {
 	/**
 	 * Handles POST /auth/refresh: exchanges the refresh cookie for a new pair.
 	 *
-	 * The presented refresh token is deleted (rotation), so each one works once.
+	 * The presented token is marked used (rotation) and its successor joins
+	 * the same family. Presenting a token that was already used means a copy
+	 * of it exists: the whole family is revoked (see revoke_reused_family()).
 	 *
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public static function handle_refresh(): WP_REST_Response|WP_Error {
-		$refresh_token = self::get_refresh_cookie();
-		$row           = null === $refresh_token ? null : self::find_valid_refresh_token( $refresh_token );
-		$user          = null === $row ? false : get_userdata( (int) $row->user_id );
+		$row = self::active_presented_token();
 
-		if ( null === $row || false === $user ) {
+		if ( null === $row ) {
 			return self::invalid_refresh_response();
 		}
 
-		// Consume the token atomically: of several concurrent requests presenting
-		// the same token, only the one whose DELETE removes the row may proceed.
-		// Checking the SELECT above alone would let them all through.
+		$user = get_userdata( (int) $row->user_id );
+
+		if ( false === $user ) {
+			return self::invalid_refresh_response();
+		}
+
+		// Consume the token atomically: of several concurrent requests
+		// presenting it, only the one whose UPDATE marks it used proceeds.
+		// Losing that race means another request used the same token at the
+		// same moment, which is reuse too.
 		global $wpdb;
-		$consumed = $wpdb->delete( self::table_name(), array( 'id' => $row->id ), array( '%d' ) );
+		$table = self::table_name();
+
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table is our own prefixed table name, never user input; wpdb::prepare() cannot placeholder identifiers.
+		$consumed = $wpdb->query( $wpdb->prepare( "UPDATE {$table} SET used_at = %s WHERE id = %d AND used_at IS NULL", gmdate( 'Y-m-d H:i:s' ), $row->id ) );
 
 		if ( 1 !== $consumed ) {
+			self::revoke_reused_family( $row );
 			return self::invalid_refresh_response();
 		}
 
 		try {
-			return self::token_response( $user );
+			return self::token_response( $user, (string) $row->family_id );
 		} catch ( RuntimeException $e ) {
 			return self::misconfigured_error();
 		}
+	}
+
+	/**
+	 * Resolves the refresh cookie to an unused, unexpired token row.
+	 *
+	 * A token that was already used triggers reuse handling (its family is
+	 * revoked) and resolves to null, like an unknown or expired one.
+	 *
+	 * @return object{id: int, user_id: int, family_id: string, expires_at: string, used_at: string|null}|null
+	 */
+	private static function active_presented_token(): ?object {
+		$refresh_token = self::get_refresh_cookie();
+		$row           = null === $refresh_token ? null : self::find_refresh_token( $refresh_token );
+
+		if ( null === $row ) {
+			return null;
+		}
+
+		if ( null !== $row->used_at ) {
+			self::revoke_reused_family( $row );
+			return null;
+		}
+
+		if ( strtotime( (string) $row->expires_at ) < time() ) {
+			return null;
+		}
+
+		return $row;
+	}
+
+	/**
+	 * Revokes a token family after one of its tokens was used twice.
+	 *
+	 * Reuse means someone holds a copy of the token: either an attacker used
+	 * it first and the real client presents the old one, or the reverse.
+	 * Revoking the whole family ends both. Other sessions of the user (other
+	 * families) are untouched.
+	 *
+	 * @param object{user_id: int, family_id: string} $row The reused token's row.
+	 */
+	private static function revoke_reused_family( object $row ): void {
+		self::revoke_family( (string) $row->family_id );
+
+		/**
+		 * Fires when a refresh token is presented after it was already used,
+		 * which usually means it was stolen. Hook in to log or alert.
+		 *
+		 * @param int    $user_id   Owner of the token.
+		 * @param string $family_id The revoked family.
+		 */
+		do_action( 'bp_tracker_refresh_token_reuse_detected', (int) $row->user_id, (string) $row->family_id );
+	}
+
+	/**
+	 * Deletes every token of a family (the whole session).
+	 *
+	 * @param string $family_id Family ID.
+	 */
+	private static function revoke_family( string $family_id ): void {
+		global $wpdb;
+
+		if ( '' === $family_id ) {
+			return;
+		}
+
+		$wpdb->delete( self::table_name(), array( 'family_id' => $family_id ), array( '%s' ) );
 	}
 
 	/**
@@ -286,23 +381,21 @@ class BP_Tracker_JWT_Auth {
 	}
 
 	/**
-	 * Handles POST /auth/logout: revokes the refresh cookie and clears it.
+	 * Handles POST /auth/logout: ends the cookie's session and clears it.
 	 *
-	 * Needs no access token: holding the refresh token proves the right to
-	 * revoke it, and logout must work even after the access token expired.
+	 * Revokes the token's whole family, so a copy an attacker might have
+	 * rotated is ended too. Needs no access token: holding the refresh token
+	 * proves the right to revoke it, and logout must work even after the
+	 * access token expired.
 	 *
 	 * @return WP_REST_Response
 	 */
 	public static function handle_logout(): WP_REST_Response {
 		$refresh_token = self::get_refresh_cookie();
+		$row           = null === $refresh_token ? null : self::find_refresh_token( $refresh_token );
 
-		if ( null !== $refresh_token ) {
-			global $wpdb;
-			$wpdb->delete(
-				self::table_name(),
-				array( 'token_hash' => self::hash_token( $refresh_token ) ),
-				array( '%s' )
-			);
+		if ( null !== $row ) {
+			self::revoke_family( (string) $row->family_id );
 		}
 
 		$response = new WP_REST_Response( array( 'success' => true ), 200 );
@@ -320,8 +413,7 @@ class BP_Tracker_JWT_Auth {
 	 * @return WP_REST_Response
 	 */
 	public static function handle_logout_all(): WP_REST_Response {
-		$refresh_token = self::get_refresh_cookie();
-		$row           = null === $refresh_token ? null : self::find_valid_refresh_token( $refresh_token );
+		$row = self::active_presented_token();
 
 		if ( null === $row ) {
 			return self::invalid_refresh_response();
@@ -457,12 +549,14 @@ class BP_Tracker_JWT_Auth {
 	 * Issues a fresh token pair for a user: the access token in the body,
 	 * the refresh token in the HttpOnly cookie.
 	 *
-	 * @param WP_User $user User to issue tokens for.
+	 * @param WP_User     $user      User to issue tokens for.
+	 * @param string|null $family_id Family of the refresh token being rotated,
+	 *                               or null to start a new one (login).
 	 * @return WP_REST_Response
 	 *
 	 * @throws RuntimeException When BP_TRACKER_JWT_SECRET is not configured.
 	 */
-	private static function token_response( WP_User $user ): WP_REST_Response {
+	private static function token_response( WP_User $user, ?string $family_id = null ): WP_REST_Response {
 		$response = new WP_REST_Response(
 			array(
 				'access_token' => self::create_access_token( $user->ID ),
@@ -479,7 +573,10 @@ class BP_Tracker_JWT_Auth {
 
 		$response->header(
 			'Set-Cookie',
-			self::build_refresh_cookie( self::create_refresh_token( $user->ID ), self::REFRESH_TOKEN_TTL )
+			self::build_refresh_cookie(
+				self::create_refresh_token( $user->ID, $family_id ?? bin2hex( random_bytes( 16 ) ) ),
+				self::REFRESH_TOKEN_TTL
+			)
 		);
 
 		return $response;
@@ -522,12 +619,13 @@ class BP_Tracker_JWT_Auth {
 	}
 
 	/**
-	 * Creates a random refresh token and stores its hash.
+	 * Creates a random refresh token in a family and stores its hash.
 	 *
-	 * @param int $user_id User ID the token belongs to.
+	 * @param int    $user_id   User ID the token belongs to.
+	 * @param string $family_id Family (session) the token belongs to.
 	 * @return string The raw refresh token (never stored as-is).
 	 */
-	private static function create_refresh_token( int $user_id ): string {
+	private static function create_refresh_token( int $user_id, string $family_id ): string {
 		$token = bin2hex( random_bytes( 32 ) );
 
 		global $wpdb;
@@ -535,40 +633,32 @@ class BP_Tracker_JWT_Auth {
 			self::table_name(),
 			array(
 				'user_id'    => $user_id,
+				'family_id'  => $family_id,
 				'token_hash' => self::hash_token( $token ),
 				'expires_at' => gmdate( 'Y-m-d H:i:s', time() + self::REFRESH_TOKEN_TTL ),
 				'created_at' => gmdate( 'Y-m-d H:i:s' ),
 			),
-			array( '%d', '%s', '%s', '%s' )
+			array( '%d', '%s', '%s', '%s', '%s' )
 		);
 
 		return $token;
 	}
 
 	/**
-	 * Looks up a non-expired refresh token by its raw value.
+	 * Looks up a refresh token by its raw value, whatever its state.
 	 *
 	 * @param string $token Raw refresh token.
-	 * @return object{id: int, user_id: int, expires_at: string}|null
+	 * @return object{id: int, user_id: int, family_id: string, expires_at: string, used_at: string|null}|null
 	 */
-	private static function find_valid_refresh_token( string $token ): ?object {
+	private static function find_refresh_token( string $token ): ?object {
 		global $wpdb;
 
 		$table = self::table_name();
-		$hash  = self::hash_token( $token );
 
 		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table is our own prefixed table name, never user input; wpdb::prepare() cannot placeholder identifiers.
-		$row = $wpdb->get_row( $wpdb->prepare( "SELECT id, user_id, expires_at FROM {$table} WHERE token_hash = %s", $hash ) );
+		$row = $wpdb->get_row( $wpdb->prepare( "SELECT id, user_id, family_id, expires_at, used_at FROM {$table} WHERE token_hash = %s", self::hash_token( $token ) ) );
 
-		if ( ! $row ) {
-			return null;
-		}
-
-		if ( strtotime( (string) $row->expires_at ) < time() ) {
-			return null;
-		}
-
-		return $row;
+		return is_object( $row ) ? $row : null;
 	}
 
 	/**

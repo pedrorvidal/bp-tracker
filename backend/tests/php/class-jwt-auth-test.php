@@ -328,7 +328,8 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 
 		$new_refresh = $this->refresh_token_from( $refresh );
 		$this->assertNotSame( $old_refresh, $new_refresh );
-		$this->assertSame( 1, $this->count_refresh_tokens() );
+		// The used token is kept (marked used) so a later replay is detectable.
+		$this->assertSame( 2, $this->count_refresh_tokens() );
 
 		// The old refresh token was invalidated by rotation.
 		$this->send_refresh_cookie( $old_refresh );
@@ -339,8 +340,9 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 
 	/**
 	 * Two requests presenting the same refresh token at once must not both
-	 * succeed. Simulated deterministically: right before this request's DELETE
-	 * runs, "another request" consumes the row first.
+	 * succeed. Simulated deterministically: right before this request marks
+	 * the token used, "another request" does so first. The loser is treated
+	 * as reuse: no new token, and the family is revoked.
 	 */
 	public function test_refresh_token_cannot_be_consumed_twice_concurrently(): void {
 		global $wpdb;
@@ -352,12 +354,11 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 		add_filter(
 			'query',
 			static function ( string $query ) use ( $table, &$raced ): string {
-				if ( ! $raced && str_starts_with( $query, "DELETE FROM `{$table}`" ) ) {
+				if ( ! $raced && str_starts_with( $query, "UPDATE {$table} SET used_at" ) ) {
 					$raced = true;
 					// The concurrent request wins the race and consumes the token.
-					$wpdb = $GLOBALS['wpdb'];
 					// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery -- test-only simulation on our own table.
-					$wpdb->query( "DELETE FROM {$table}" );
+					$GLOBALS['wpdb']->query( "UPDATE {$table} SET used_at = UTC_TIMESTAMP()" );
 				}
 				return $query;
 			}
@@ -369,7 +370,7 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 		$this->assertTrue( $raced, 'The race was simulated.' );
 		$this->assertSame( 401, $response->get_status() );
 		$this->assertArrayNotHasKey( 'access_token', $response->get_data() );
-		$this->assertSame( 0, $this->count_refresh_tokens(), 'No new refresh token was issued.' );
+		$this->assertSame( 0, $this->count_refresh_tokens(), 'No new token; the family is revoked.' );
 	}
 
 	/**
@@ -515,6 +516,32 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 		);
 
 		$this->assertSame( 201, $response->get_status() );
+	}
+
+	/**
+	 * Re-running create_tables() on an up-to-date schema must not issue DDL:
+	 * besides being wasteful, ALTER TABLE implicitly commits the current
+	 * transaction (breaking WP-Unit's per-test rollback). dbDelta() compares
+	 * column types textually, so the schema must spell them the way MySQL
+	 * reports them (e.g. "bigint(20) unsigned").
+	 */
+	public function test_create_tables_is_a_no_op_when_the_schema_is_current(): void {
+		BP_Tracker_JWT_Auth::create_tables();
+
+		$ddl = array();
+		add_filter(
+			'query',
+			static function ( string $query ) use ( &$ddl ): string {
+				if ( 1 === preg_match( '/^\s*(ALTER|CREATE|DROP)\b/i', $query ) ) {
+					$ddl[] = $query;
+				}
+				return $query;
+			}
+		);
+
+		BP_Tracker_JWT_Auth::create_tables();
+
+		$this->assertSame( array(), $ddl );
 	}
 
 	/**

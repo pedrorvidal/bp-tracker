@@ -115,6 +115,10 @@ Authentication is built into the plugin (`backend/includes/class-bp-tracker-jwt-
 
   On the server, only a SHA-256 hash of each refresh token is stored (`wp_bp_tracker_refresh_tokens`). Every refresh consumes the presented token atomically and issues a new one, so each token works once, even when two requests present it at the same moment.
 
+- **Reuse detection:** each login starts a token _family_, the chain of refresh tokens of one session. Every refresh marks the presented token as used, keeps it until it expires, and issues its successor in the same family. If a used token is presented again (to `refresh` or `logout-all`), someone holds a copy of it. Either an attacker already rotated a stolen token and the real client now presents the old one, or the reverse. Because the two can't be told apart, the **whole family is revoked**, which ends the attacker's copy too. The request gets `401 bp_tracker_jwt_invalid_refresh_token`, and the action `bp_tracker_refresh_token_reuse_detected( $user_id, $family_id )` fires so it can be logged or trigger an alert.
+
+  Only that session is revoked; the user's other sessions (other families) are untouched. An access token the attacker already holds stays valid until it expires (at most 15 minutes). A lost refresh response can also trigger detection: the browser keeps the old cookie and presents it again. The effect is the same as without detection, because the old token no longer works either way: that device has to sign in again.
+
 - **CSRF protection:** the browser sends the cookie automatically, so every `/auth/*` route requires the header `X-BP-Tracker-CSRF: 1`. A custom header forces a CORS preflight, which only `BP_TRACKER_FRONTEND_ORIGIN` passes. Without the header, the response is `403 bp_tracker_jwt_missing_csrf_header`.
 - **Session revocation:** each access token carries the user's _session generation_ (`gen` claim). Revoking all of a user's sessions increments it, so every access token issued before is rejected immediately (`401 bp_tracker_jwt_invalid_token`), and all their refresh tokens are deleted. This happens:
   - when the password changes (reset, profile screen, WP-CLI, `wp_set_password()`);
@@ -208,7 +212,7 @@ The response includes a `Retry-After` header. The same value is also in the body
 
 ### `POST /bp-tracker/v1/auth/refresh`
 
-Exchanges the refresh cookie for a new access token. It also rotates the cookie: the presented token is consumed and a new one is set. The request has no body.
+Exchanges the refresh cookie for a new access token. It also rotates the cookie: the presented token is marked used and its successor, in the same family, is set. The request has no body. Presenting a token that was already used revokes its whole family (see _Reuse detection_ above).
 
 **Headers:** `X-BP-Tracker-CSRF: 1`, plus the `bp_tracker_refresh` cookie
 
@@ -221,9 +225,9 @@ curl -s -b cookies.txt -c cookies.txt -X POST http://localhost:8888/wp-json/bp-t
 
 **Errors:**
 
-| Status | `code`                                 | Cause                                                                                                                  |
-| ------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `401`  | `bp_tracker_jwt_invalid_refresh_token` | The cookie is missing or malformed, or its token is unknown, expired, already used or revoked, or its user was deleted |
+| Status | `code`                                 | Cause                                                                                                                                                                |
+| ------ | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `401`  | `bp_tracker_jwt_invalid_refresh_token` | The cookie is missing or malformed, or its token is unknown, expired or revoked, or its user was deleted. If the token was already used, its family is also revoked. |
 
 The 401 also clears the cookie (`Max-Age=0`):
 
@@ -237,7 +241,7 @@ The 401 also clears the cookie (`Max-Age=0`):
 
 ### `POST /bp-tracker/v1/auth/logout`
 
-Revokes the refresh token from the cookie and clears the cookie. No access token is needed: holding the refresh token proves the right to revoke it, and logout must also work after the access token has expired. The request has no body.
+Ends the cookie's session: revokes its whole token family, including a copy an attacker may have rotated, and clears the cookie. No access token is needed: holding the refresh token proves the right to revoke it, and logout must also work after the access token has expired. The request has no body.
 
 **Headers:** `X-BP-Tracker-CSRF: 1`, plus the `bp_tracker_refresh` cookie
 
@@ -252,7 +256,7 @@ curl -s -b cookies.txt -c cookies.txt -X POST http://localhost:8888/wp-json/bp-t
 { "success": true }
 ```
 
-The response is `200` even without a cookie, or with a token that was already revoked, so logging out twice is safe. It only revokes the presented token; the user's other sessions (other devices) are untouched. Use `logout-all` to end those too.
+The response is `200` even without a cookie, or with a token that was already revoked, so logging out twice is safe. It only ends the presented token's session; the user's other sessions (other devices) are untouched. Use `logout-all` to end those too.
 
 ### `POST /bp-tracker/v1/auth/logout-all`
 
@@ -273,9 +277,9 @@ curl -s -b cookies.txt -c cookies.txt -X POST http://localhost:8888/wp-json/bp-t
 
 **Errors:**
 
-| Status | `code`                                 | Cause                                                                             |
-| ------ | -------------------------------------- | --------------------------------------------------------------------------------- |
-| `401`  | `bp_tracker_jwt_invalid_refresh_token` | No valid refresh cookie, so the caller can't be identified and nothing is revoked |
+| Status | `code`                                 | Cause                                                                                                                           |
+| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `401`  | `bp_tracker_jwt_invalid_refresh_token` | No valid refresh cookie, so nothing else is revoked. A cookie that was already used counts as reuse and revokes its own family. |
 
 ---
 
