@@ -71,8 +71,13 @@ describe('App', () => {
 
     await userEvent.click(within(nav).getByRole('link', { name: 'History' }))
 
+    // The history route is lazy-loaded: allow time for its chunk to import.
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'History' }),
+      await screen.findByRole(
+        'heading',
+        { level: 2, name: 'History' },
+        { timeout: 5000 },
+      ),
     ).toBeInTheDocument()
     expect(within(nav).getByRole('link', { name: 'History' })).toHaveAttribute(
       'aria-current',

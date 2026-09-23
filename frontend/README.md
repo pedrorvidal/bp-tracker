@@ -91,23 +91,39 @@ Query keys come from `readingsKeys` (`['readings', ...]`). Signing out clears th
 
 ### History page (`src/pages/History.tsx`)
 
-Top to bottom, stacked on mobile: period selector, summary, chart, then the list of readings. The selected period lives in `History` as a `DateRange` (`lib/dateRange.ts`): whole local days, both ends inclusive, as `YYYY-MM-DD`, with `{ start: null, end: null }` meaning lifetime. `rangeToParams()` turns it into `period_start`/`period_end`, from midnight of the first day to 23:59:59 of the last, with the local offset. Lifetime sends no params. The period is part of every query key, so changing it refetches readings and stats.
+The layout is mobile-first: one stacked column with no breakpoint prefix, and `lg:`/`xl:` only enhance larger screens. Pages share a `max-w-7xl` container, and each page sets its own content width (the form and login stay narrow). From `lg` up, the title and the period selector share a row, the summary is a row of four cards, and the chart grows from 320px to 480px tall.
 
-- **`components/PeriodSelector.tsx`:**
-  - presets for 7, 10, 30 and 90 days and Lifetime, as toggle buttons with `aria-pressed`;
+The selected period lives in `History` as a `DateRange` (`lib/dateRange.ts`): whole local days, both ends inclusive, as `YYYY-MM-DD`, with `{ start: null, end: null }` meaning lifetime. `rangeToParams()` turns it into `period_start`/`period_end`, from midnight of the first day to 23:59:59 of the last, with the local offset. Lifetime sends no params. The period is part of every query key, so changing it refetches.
+
+- **`PeriodSelector`:**
+  - a segmented control with presets for 7, 10, 30 and 90 days and Lifetime, as toggle buttons with `aria-pressed`;
   - **Custom**, with two native `<input type="date">` fields, capped at today, and an accessible error when the start is after the end;
   - it emits `{ start, end }` only when the range is valid.
-- **`components/SummaryCard.tsx`:**
-  - average, minimum and maximum of systolic, diastolic and pulse from `GET /stats`;
-  - each average compared with the **previous period of the same length** (e.g. the 30 days before the last 30), as an absolute change in words, such as "3.8 mmHg lower than the previous 30 days";
-  - the comparison is omitted, with a short note, when the previous period has fewer than `MIN_READINGS_TO_COMPARE` (3) readings. It is also omitted for a measure missing from either period, and for lifetime.
-- **`components/ReadingsChart.tsx`:** two panels sharing the time axis, `BpPanel` for systolic above and diastolic below, each on its own **reference bands**. The categories use different thresholds per measure (systolic 120/130/140, diastolic 80/90), and one set of horizontal bands can't be right for both lines on a shared mmHg axis.
-  - **Bands:** status tints at low opacity, each named beside the plot, with a legend (`ChartLegend.tsx`). The legend states that the bands are the 2017 ACC/AHA categories for reference, not a diagnosis. The bands are drawn even when there is no data.
-  - **Line colors:** systolic violet and diastolic blue (`chartSeries.ts`, validated pair). Red is avoided because it would disappear into the red "Stage 2" band.
-  - **Zoom:** a `Brush` under the bottom panel zooms and pans both panels (`syncId`). The crosshair is synced too, and the tooltip (`ChartTooltip.tsx`) shows time, both pressures, pulse and the reading's category.
-  - **Auto-aggregation:** above `AGGREGATE_THRESHOLD` (100) readings in the period, the chart plots **daily averages** (`lib/aggregate.ts`, by local day) and says so, with a **Show every reading** button that switches back and forth.
-  - **Dots** are drawn up to 31 points; above that only the lines, to avoid clutter on phones.
-- **List:** cards on mobile and a table from `md` up, with delete and confirmation, as before.
+- **`SummaryCard`**, four mini-cards (`StatCard`) in `grid-cols-2 lg:grid-cols-4`:
+  - **Avg systolic, diastolic and pulse:** a `text-3xl font-bold tabular-nums` value, min/max, and the change against the **previous period of the same length**, in words.
+  - **Change colors:** for blood pressure a drop is green and a rise is red; pulse and "no change" stay neutral. The comparison is omitted, keeping the layout, when the previous period has fewer than 3 readings, for a measure missing from either period, and for lifetime.
+  - **Readings:** the count plus the **category distribution**: a proportional bar (decorative) and pills such as "18 Normal · 3 Elevated · 1 Stage 1". The categories are computed from the same cached readings query as the list, with no extra request.
+- **`ReadingsChart`:** one `LineChart` on a shared mmHg axis.
+  - **Lines:** systolic in red and diastolic in blue, with dots up to 31 points.
+  - **X axis:** categorical, one position per reading, so time gaps aren't to scale. The list below has the exact dates.
+  - **Normal limits:** dashed `ReferenceLine`s at 120 (systolic) and 80 (diastolic). They are labelled in the right margin, outside the plot so they never cover data: the full text on `lg`, just the value on phones.
+  - **Tooltip:** date and time, the reading as `133/85 mmHg`, pulse, and the reading's **category** with its color dot (`classify()` in `lib/bpCategory.ts`).
+  - **No category bands:** the categories use different thresholds for systolic and diastolic, so bands on a shared axis would be wrong.
+  - **Zoom:** a `Brush` zooms and pans.
+  - **Auto-aggregation:** above 100 readings the chart plots **daily averages**, with a **Show every reading** toggle.
+  - **Legend:** chips for the two lines and the normal limits.
+- **List:** cards on mobile and a table from `md` up, full width, with delete and confirmation.
+
+Categories follow the 2017 ACC/AHA guideline, where a reading takes the more severe of its systolic and diastolic categories. They are shown for reference, not as a diagnosis.
+
+### Dark mode
+
+The app follows the OS setting (`prefers-color-scheme`) through Tailwind's `dark:` variants. There is no manual toggle.
+
+- **Colors:** every surface, text and border color has a `dark:` counterpart. `src/test/darkModeCoverage.test.ts` fails the build if a component adds a light color without one, which would otherwise make text unreadable on the dark background.
+- **Native controls:** `color-scheme: light dark` makes date pickers and scrollbars follow the theme too.
+- **Charts:** Recharts takes colors as props, not classes, so the chart reads the scheme with `usePrefersDark()` (built on `useMediaQuery()`) and switches to the dark steps of the same validated palette (`components/chartSeries.ts`).
+- **Transitions:** buttons and links animate their hover colors (`transition-colors duration-200`).
 
 ### Dates
 

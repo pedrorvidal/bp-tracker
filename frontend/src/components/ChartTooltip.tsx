@@ -1,20 +1,19 @@
 import type { TooltipContentProps, TooltipValueType } from 'recharts'
 import type { ChartPoint } from '../lib/aggregate'
-import { CATEGORY_LABELS, classify } from '../lib/bpCategory'
+import { classify } from '../lib/bpCategory'
 import { formatDateTime } from '../lib/format'
-import { SERIES } from './chartSeries'
+import CategoryBadge from './CategoryBadge'
 
 /**
  * Tooltip for a chart point: when it was taken (or which day it averages),
- * both pressures, pulse and the reference category.
+ * the reading as systolic/diastolic, pulse, and its ACC/AHA category.
  */
 export default function ChartTooltip({
   active,
   payload,
 }: TooltipContentProps<TooltipValueType, string | number>) {
   const point = payload?.[0]?.payload as ChartPoint | undefined
-  // Placeholder points of an empty chart carry no values.
-  if (!active || !point || typeof point.systolic !== 'number') {
+  if (!active || !point) {
     return null
   }
 
@@ -28,25 +27,21 @@ export default function ChartTooltip({
       : `${day} · average of ${point.count} readings`
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-md">
-      <p className="font-semibold text-slate-900">{when}</p>
-      <ul className="mt-1 space-y-0.5">
-        {(['systolic', 'diastolic'] as const).map((key) => (
-          <li key={key} className="flex items-center gap-2">
-            <span
-              aria-hidden="true"
-              className="inline-block h-0.5 w-3"
-              style={{ backgroundColor: SERIES[key].color }}
-            />
-            {SERIES[key].name} {point[key]} mmHg
-          </li>
-        ))}
-        {point.pulse !== null && (
-          <li className="pl-5">Pulse {point.pulse} bpm</li>
-        )}
-      </ul>
-      <p className="mt-1 text-slate-600">
-        {CATEGORY_LABELS[classify(point.systolic, point.diastolic)]} (reference)
+    <div className="min-w-44 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-lg dark:border-slate-700 dark:bg-slate-900">
+      <p className="text-slate-500 dark:text-slate-400">{when}</p>
+      <p className="mt-1 text-lg font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+        {point.systolic}/{point.diastolic}{' '}
+        <span className="text-sm font-normal text-slate-500 dark:text-slate-400">
+          mmHg
+        </span>
+      </p>
+      {point.pulse !== null && (
+        <p className="text-slate-700 tabular-nums dark:text-slate-300">
+          Pulse {point.pulse} bpm
+        </p>
+      )}
+      <p className="mt-2">
+        <CategoryBadge category={classify(point.systolic, point.diastolic)} />
       </p>
     </div>
   )

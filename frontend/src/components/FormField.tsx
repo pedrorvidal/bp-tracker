@@ -38,15 +38,21 @@ export default function FormField({
     <div>
       <label
         htmlFor={id}
-        className="block text-base font-medium text-slate-900"
+        className="block text-base font-medium text-slate-900 dark:text-slate-100"
       >
         {label}
         {optional && (
-          <span className="font-normal text-slate-600"> (optional)</span>
+          <span className="font-normal text-slate-600 dark:text-slate-400">
+            {' '}
+            (optional)
+          </span>
         )}
       </label>
       {hint && (
-        <p id={hintId} className="mt-0.5 text-sm text-slate-600">
+        <p
+          id={hintId}
+          className="mt-0.5 text-sm text-slate-600 dark:text-slate-400"
+        >
           {hint}
         </p>
       )}

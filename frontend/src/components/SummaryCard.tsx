@@ -1,4 +1,5 @@
-import { useStats } from '../hooks/useReadings'
+import { useAllReadings, useStats } from '../hooks/useReadings'
+import { categoryCounts } from '../lib/bpCategory'
 import {
   describeRange,
   isLifetime,
@@ -7,27 +8,31 @@ import {
   rangeToParams,
   type DateRange,
 } from '../lib/dateRange'
-import MeasureStats, { type MeasureInfo } from './MeasureStats'
+import { formatAverage } from '../lib/format'
+import type { ReadingStats } from '../types'
+import CategoryDistribution from './CategoryDistribution'
+import StatCard, { type Change } from './StatCard'
 
 /** Fewer readings than this in the previous period: no comparison (too noisy). */
 export const MIN_READINGS_TO_COMPARE = 3
-
-const MEASURES: MeasureInfo[] = [
-  { key: 'systolic', label: 'Systolic', unit: 'mmHg' },
-  { key: 'diastolic', label: 'Diastolic', unit: 'mmHg' },
-  { key: 'pulse', label: 'Pulse', unit: 'bpm' },
-]
 
 interface SummaryCardProps {
   range: DateRange
 }
 
+type Measure = 'systolic' | 'diastolic' | 'pulse'
+
 /**
- * Average, minimum and maximum of each measure for the selected period, and
- * how the averages changed against the previous period of the same length.
+ * Headline numbers of the selected period as four mini-cards (averages of
+ * systolic, diastolic and pulse, and the reading count with the category
+ * distribution), each average compared with the previous period of the same
+ * length.
  */
 export default function SummaryCard({ range }: SummaryCardProps) {
-  const current = useStats(rangeToParams(range))
+  const params = rangeToParams(range)
+  const current = useStats(params)
+  // Same query as the history list: served from the cache, no extra request.
+  const readings = useAllReadings(params)
   const before = previousRange(range)
   const previous = useStats(before ? rangeToParams(before) : {}, {
     enabled: before !== null,
@@ -35,56 +40,101 @@ export default function SummaryCard({ range }: SummaryCardProps) {
 
   const days = rangeLengthDays(range)
   const previousLabel = `previous ${days} ${days === 1 ? 'day' : 'days'}`
-  const canCompare =
+  const comparable =
     before !== null &&
     previous.data !== undefined &&
     previous.data.count >= MIN_READINGS_TO_COMPARE
+      ? previous.data
+      : null
+
+  function change(
+    stats: ReadingStats,
+    measure: Measure,
+    unit: string,
+  ): Change | null {
+    const now = stats[`${measure}_average`]
+    const then = comparable?.[`${measure}_average`] ?? null
+    if (now === null || then === null) {
+      return null
+    }
+    return { delta: Math.round((now - then) * 10) / 10, unit, previousLabel }
+  }
+
+  function minMax(stats: ReadingStats, measure: Measure): string {
+    return `Min ${stats[`${measure}_min`] ?? '—'} · Max ${stats[`${measure}_max`] ?? '—'}`
+  }
 
   return (
-    <section
-      aria-labelledby="summary-heading"
-      className="rounded-lg border border-slate-200 bg-white p-4 sm:p-6"
-    >
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-        <h3 id="summary-heading" className="text-base font-semibold sm:text-lg">
-          Summary, {describeRange(range)}
-        </h3>
-        {current.data && (
-          <p className="text-sm text-slate-600">
-            {current.data.count}{' '}
-            {current.data.count === 1 ? 'reading' : 'readings'}
-          </p>
-        )}
-      </div>
+    <section aria-labelledby="summary-heading" className="space-y-4">
+      <h3
+        id="summary-heading"
+        className="text-xl font-semibold text-slate-900 dark:text-slate-100"
+      >
+        Summary, {describeRange(range)}
+      </h3>
 
       {current.isPending && (
-        <p role="status" className="mt-2 text-slate-700">
+        <p role="status" className="text-slate-500 dark:text-slate-400">
           Loading summary…
         </p>
       )}
       {current.isError && (
-        <p role="alert" className="mt-2 text-red-800">
+        <p role="alert" className="text-red-700 dark:text-red-400">
           Could not load the summary.
         </p>
       )}
+
       {current.data && (
-        <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {MEASURES.map((measure) => (
-            <MeasureStats
-              key={measure.key}
-              stats={current.data}
-              previous={canCompare ? (previous.data ?? null) : null}
-              measure={measure}
-              previousLabel={previousLabel}
-            />
-          ))}
+        <dl className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <StatCard
+            label="Avg systolic"
+            value={formatAverage(current.data.systolic_average)}
+            unit="mmHg"
+            detail={minMax(current.data, 'systolic')}
+            change={change(current.data, 'systolic', 'mmHg')}
+            tone="lowerIsBetter"
+          />
+          <StatCard
+            label="Avg diastolic"
+            value={formatAverage(current.data.diastolic_average)}
+            unit="mmHg"
+            detail={minMax(current.data, 'diastolic')}
+            change={change(current.data, 'diastolic', 'mmHg')}
+            tone="lowerIsBetter"
+          />
+          <StatCard
+            label="Avg pulse"
+            value={formatAverage(current.data.pulse_average)}
+            unit="bpm"
+            detail={minMax(current.data, 'pulse')}
+            change={change(current.data, 'pulse', 'bpm')}
+          />
+          <StatCard
+            label="Readings"
+            value={String(current.data.count)}
+            detail={
+              current.data.count === 1
+                ? 'reading in the period'
+                : 'readings in the period'
+            }
+          >
+            {readings.data && (
+              <CategoryDistribution counts={categoryCounts(readings.data)} />
+            )}
+          </StatCard>
         </dl>
       )}
-      {current.data && !isLifetime(range) && !canCompare && (
-        <p className="mt-2 text-sm text-slate-600">
+
+      {current.data && !isLifetime(range) && comparable === null && (
+        <p className="text-sm text-slate-500 dark:text-slate-400">
           Not enough readings in the {previousLabel} to compare.
         </p>
       )}
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Categories follow the 2017 ACC/AHA guideline (a reading takes the more
+        severe of its systolic and diastolic categories). For reference only;
+        not a diagnosis.
+      </p>
     </section>
   )
 }

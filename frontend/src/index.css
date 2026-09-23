@@ -1,1 +1,7 @@
 @import 'tailwindcss';
+
+/* Native controls (date pickers, scrollbars) follow the OS light/dark theme,
+   like the dark: variants do. */
+:root {
+  color-scheme: light dark;
+}

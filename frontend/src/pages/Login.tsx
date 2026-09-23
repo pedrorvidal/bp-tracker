@@ -70,12 +70,12 @@ export default function Login() {
   }
 
   const inputClass =
-    'mt-1 block w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-700'
+    'mt-1 block w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100'
 
   return (
     <section
       aria-labelledby="login-heading"
-      className="mx-auto w-full sm:max-w-sm sm:rounded-lg sm:border sm:border-slate-200 sm:bg-white sm:p-8 sm:shadow-sm"
+      className="mx-auto w-full sm:max-w-sm sm:rounded-lg sm:border sm:border-slate-200 sm:bg-white sm:p-8 sm:shadow-sm sm:dark:border-slate-700 sm:dark:bg-slate-900"
     >
       <h2 id="login-heading" className="text-xl font-semibold sm:text-2xl">
         Sign in
@@ -91,7 +91,7 @@ export default function Login() {
           <p
             id={errorId}
             role="alert"
-            className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+            className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
           >
             {error}
           </p>
@@ -100,7 +100,7 @@ export default function Login() {
         <div>
           <label
             htmlFor="login-username"
-            className="block text-sm font-medium text-slate-800"
+            className="block text-sm font-medium text-slate-800 dark:text-slate-200"
           >
             Username or email
           </label>
@@ -121,7 +121,7 @@ export default function Login() {
         <div>
           <label
             htmlFor="login-password"
-            className="block text-sm font-medium text-slate-800"
+            className="block text-sm font-medium text-slate-800 dark:text-slate-200"
           >
             Password
           </label>
@@ -140,7 +140,7 @@ export default function Login() {
         <button
           type="submit"
           disabled={submitting}
-          className="w-full rounded-md bg-blue-700 px-4 py-2.5 text-base font-semibold text-white hover:bg-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+          className="w-full rounded-md bg-blue-700 px-4 py-2.5 text-base font-semibold text-white hover:bg-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:cursor-not-allowed disabled:opacity-70 transition-colors duration-200"
         >
           {submitting ? 'Signing in…' : 'Sign in'}
         </button>

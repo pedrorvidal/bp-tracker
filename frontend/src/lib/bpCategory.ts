@@ -1,6 +1,6 @@
 /**
- * Blood pressure categories of the 2017 ACC/AHA guideline, used for the
- * chart's reference bands. For reference only; not a diagnosis.
+ * Blood pressure categories of the 2017 ACC/AHA guideline. For reference
+ * only; not a diagnosis.
  */
 
 export type BpCategory = 'normal' | 'elevated' | 'stage1' | 'stage2'
@@ -13,9 +13,8 @@ export const CATEGORY_LABELS: Record<BpCategory, string> = {
 }
 
 /**
- * Status palette (good / warning / serious / critical). Used only as faint
- * background tints, never for data lines, so the zones don't compete with
- * the series.
+ * Status palette (good / warning / serious / critical), for category markers
+ * (always next to the category name, never color alone).
  */
 export const CATEGORY_COLORS: Record<BpCategory, string> = {
   normal: '#0ca30c',
@@ -24,10 +23,11 @@ export const CATEGORY_COLORS: Record<BpCategory, string> = {
   stage2: '#d03b3b',
 }
 
-/** Background opacity of the reference bands. */
-export const ZONE_OPACITY = 0.12
+/** Upper bounds of the "normal" category, drawn as reference lines. */
+export const NORMAL_SYSTOLIC_BELOW = 120
+export const NORMAL_DIASTOLIC_BELOW = 80
 
-export interface Zone {
+interface Zone {
   category: BpCategory
   /** Inclusive lower bound (mmHg); null = open-ended. */
   from: number | null
@@ -35,16 +35,16 @@ export interface Zone {
   to: number | null
 }
 
-/** Systolic bands: <120, 120–129, 130–139, ≥140. */
-export const SYSTOLIC_ZONES: Zone[] = [
+/** Systolic thresholds: <120, 120–129, 130–139, ≥140. */
+const SYSTOLIC_ZONES: Zone[] = [
   { category: 'normal', from: null, to: 120 },
   { category: 'elevated', from: 120, to: 130 },
   { category: 'stage1', from: 130, to: 140 },
   { category: 'stage2', from: 140, to: null },
 ]
 
-/** Diastolic bands: <80, 80–89, ≥90 ("elevated" is systolic-only). */
-export const DIASTOLIC_ZONES: Zone[] = [
+/** Diastolic thresholds: <80, 80–89, ≥90 ("elevated" is systolic-only). */
+const DIASTOLIC_ZONES: Zone[] = [
   { category: 'normal', from: null, to: 80 },
   { category: 'stage1', from: 80, to: 90 },
   { category: 'stage2', from: 90, to: null },
@@ -71,3 +71,21 @@ export function classify(systolic: number, diastolic: number): BpCategory {
     ? bySystolic
     : byDiastolic
 }
+
+/** How many readings fall in each category, in category order. */
+export function categoryCounts(
+  readings: ReadonlyArray<{ systolic: number; diastolic: number }>,
+): Record<BpCategory, number> {
+  const counts: Record<BpCategory, number> = {
+    normal: 0,
+    elevated: 0,
+    stage1: 0,
+    stage2: 0,
+  }
+  for (const reading of readings) {
+    counts[classify(reading.systolic, reading.diastolic)] += 1
+  }
+  return counts
+}
+
+export const CATEGORY_ORDER: readonly BpCategory[] = ORDER

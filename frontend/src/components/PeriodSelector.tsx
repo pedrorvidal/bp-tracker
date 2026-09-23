@@ -17,10 +17,10 @@ interface PeriodSelectorProps {
 }
 
 const buttonClass =
-  'min-h-11 rounded-md px-3 text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 aria-pressed:bg-blue-700 aria-pressed:text-white aria-pressed:hover:bg-blue-700'
+  'min-h-11 rounded-lg px-3 text-sm font-medium text-slate-600 transition-colors duration-200 hover:bg-white/70 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 aria-pressed:bg-white aria-pressed:text-slate-900 aria-pressed:shadow-sm dark:text-slate-400 dark:hover:bg-slate-700/60 dark:hover:text-slate-100 dark:aria-pressed:bg-slate-700 dark:aria-pressed:text-white'
 
 const inputClass =
-  'block min-h-11 w-full rounded-md border border-slate-400 bg-white px-3 text-base text-slate-900 focus:border-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 aria-invalid:border-red-700'
+  'block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base text-slate-900 transition-colors duration-200 focus:border-blue-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 aria-invalid:border-red-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100'
 
 /**
  * Period presets (7/10/30/90 days, lifetime) plus a custom range made of two
@@ -62,7 +62,7 @@ export default function PeriodSelector({
       <div
         role="group"
         aria-label="Period"
-        className="grid grid-cols-3 gap-1 rounded-lg border border-slate-300 bg-white p-1 sm:inline-flex sm:flex-wrap"
+        className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1 sm:inline-flex sm:flex-wrap dark:bg-slate-800"
       >
         {PRESETS.map((preset) => (
           <button
@@ -97,13 +97,13 @@ export default function PeriodSelector({
       {customOpen && (
         <fieldset
           id={`${errorId}-custom`}
-          className="grid grid-cols-2 gap-3 sm:max-w-md"
+          className="grid grid-cols-2 gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:max-w-md dark:border-slate-700 dark:bg-slate-900"
         >
           <legend className="sr-only">Custom period</legend>
           <div>
             <label
               htmlFor={`${errorId}-from`}
-              className="block text-sm font-medium text-slate-800"
+              className="block text-sm text-slate-500 dark:text-slate-400"
             >
               From
             </label>
@@ -121,7 +121,7 @@ export default function PeriodSelector({
           <div>
             <label
               htmlFor={`${errorId}-to`}
-              className="block text-sm font-medium text-slate-800"
+              className="block text-sm text-slate-500 dark:text-slate-400"
             >
               To
             </label>
@@ -140,7 +140,7 @@ export default function PeriodSelector({
             <p
               id={errorId}
               role="alert"
-              className="col-span-2 text-sm font-medium text-red-800"
+              className="col-span-2 text-sm font-medium text-red-700 dark:text-red-400"
             >
               {error}
             </p>

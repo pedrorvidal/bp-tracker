@@ -13,7 +13,7 @@ function deleteLabel(reading: Reading): string {
 }
 
 const deleteButtonClass =
-  'min-h-11 rounded-md border border-red-700 px-3 text-sm font-medium text-red-800 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60'
+  'min-h-11 rounded-lg border border-red-700 px-3 text-sm font-medium text-red-800 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500 dark:text-red-300 dark:hover:bg-red-950/40 transition-colors duration-200'
 
 /**
  * Readings, newest first: stacked cards on small screens, a table from md up.
@@ -31,30 +31,32 @@ export default function ReadingList({
         {readings.map((reading) => (
           <li
             key={reading.id}
-            className="rounded-lg border border-slate-200 bg-white p-4"
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
                   <time dateTime={reading.reading_datetime}>
                     {formatDateTime(reading.reading_datetime)}
                   </time>
                 </p>
-                <p className="mt-1 text-2xl font-semibold text-slate-900">
+                <p className="mt-1 text-2xl font-bold text-slate-900 tabular-nums dark:text-slate-100">
                   {reading.systolic}/{reading.diastolic}{' '}
-                  <span className="text-base font-normal text-slate-600">
+                  <span className="text-base font-normal text-slate-600 dark:text-slate-400">
                     mmHg
                   </span>
                 </p>
                 {(reading.pulse !== null || reading.weight !== null) && (
-                  <p className="mt-1 text-slate-700">
+                  <p className="mt-1 text-slate-700 dark:text-slate-300">
                     {reading.pulse !== null && <>Pulse {reading.pulse} bpm</>}
                     {reading.pulse !== null && reading.weight !== null && ' · '}
                     {reading.weight !== null && <>Weight {reading.weight} kg</>}
                   </p>
                 )}
                 {reading.notes && (
-                  <p className="mt-1 text-sm text-slate-600">{reading.notes}</p>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                    {reading.notes}
+                  </p>
                 )}
               </div>
               <button
@@ -71,9 +73,9 @@ export default function ReadingList({
         ))}
       </ul>
 
-      <table className="hidden w-full border-collapse overflow-hidden rounded-lg bg-white text-left md:table">
+      <table className="hidden w-full border-collapse overflow-hidden rounded-2xl bg-white text-left shadow-sm ring-1 ring-slate-200 md:table dark:bg-slate-900 dark:ring-slate-700">
         <caption className="sr-only">Readings, newest first</caption>
-        <thead className="border-b border-slate-200 text-sm text-slate-600">
+        <thead className="border-b border-slate-200 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-400">
           <tr>
             <th scope="col" className="px-4 py-3 font-medium">
               Date and time
@@ -95,24 +97,24 @@ export default function ReadingList({
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
           {readings.map((reading) => (
             <tr key={reading.id}>
-              <td className="px-4 py-3 text-slate-700">
+              <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
                 <time dateTime={reading.reading_datetime}>
                   {formatDateTime(reading.reading_datetime)}
                 </time>
               </td>
-              <td className="px-4 py-3 font-semibold text-slate-900">
+              <td className="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">
                 {reading.systolic}/{reading.diastolic}
               </td>
-              <td className="px-4 py-3 text-slate-700">
+              <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
                 {reading.pulse ?? '—'}
               </td>
-              <td className="px-4 py-3 text-slate-700">
+              <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
                 {reading.weight ?? '—'}
               </td>
-              <td className="px-4 py-3 text-sm text-slate-600">
+              <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
                 {reading.notes}
               </td>
               <td className="px-4 py-3 text-right">

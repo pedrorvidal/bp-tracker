@@ -222,7 +222,7 @@ describe('History', () => {
         name: 'Summary, last 30 days',
       })
       await waitFor(() => {
-        expect(summary).toHaveTextContent('124.3 mmHg average')
+        expect(summary).toHaveTextContent('Avg systolic124.3 mmHg')
       })
       expect(summary).toHaveTextContent('Min 118 · Max 134')
     })

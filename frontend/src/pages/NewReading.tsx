@@ -54,7 +54,7 @@ function describeSaved(reading: Reading): string {
 }
 
 const inputClass =
-  'block min-h-12 w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-lg text-slate-900 shadow-sm focus:border-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 aria-invalid:border-red-700'
+  'block min-h-12 w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-lg text-slate-900 shadow-sm focus:border-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 aria-invalid:border-red-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100'
 
 export default function NewReading() {
   const [values, setValues] = useState<ReadingFormValues>(emptyValues)
@@ -142,7 +142,7 @@ export default function NewReading() {
       {/* Always rendered, so screen readers announce the confirmation. */}
       <div role="status" className="mt-4 empty:hidden">
         {saved && (
-          <p className="flex items-start gap-2 rounded-md border border-green-700 bg-green-50 px-4 py-3 text-base text-green-900">
+          <p className="flex items-start gap-2 rounded-md border border-green-700 bg-green-50 px-4 py-3 text-base text-green-900 dark:border-green-600 dark:bg-green-950/40 dark:text-green-200">
             <svg
               aria-hidden="true"
               viewBox="0 0 20 20"
@@ -158,7 +158,7 @@ export default function NewReading() {
       {formError && (
         <p
           role="alert"
-          className="mt-4 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-base text-red-800"
+          className="mt-4 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-base text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
         >
           {formError}
         </p>
@@ -285,7 +285,7 @@ export default function NewReading() {
         <button
           type="submit"
           disabled={pending}
-          className="min-h-12 w-full rounded-md bg-blue-700 px-4 py-3 text-lg font-semibold text-white hover:bg-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+          className="min-h-12 w-full rounded-md bg-blue-700 px-4 py-3 text-lg font-semibold text-white hover:bg-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto transition-colors duration-200"
         >
           {pending ? 'Saving…' : 'Save reading'}
         </button>

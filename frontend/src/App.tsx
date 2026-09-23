@@ -14,19 +14,19 @@ export default function App() {
   const { isAuthenticated, user, logout } = useAuth()
 
   return (
-    <div className="min-h-dvh bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
+    <div className="min-h-dvh bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <header className="border-b border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 lg:px-8">
           <h1 className="text-lg font-bold sm:text-xl">BP Tracker</h1>
           {isAuthenticated && (
             <div className="flex items-center gap-3">
-              <span className="hidden text-sm text-slate-700 sm:inline">
+              <span className="hidden text-sm text-slate-700 sm:inline dark:text-slate-300">
                 {user?.displayName}
               </span>
               <button
                 type="button"
                 onClick={() => void logout()}
-                className="min-h-11 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-800 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
+                className="min-h-11 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-800 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors duration-200"
               >
                 Sign out
               </button>
@@ -41,7 +41,7 @@ export default function App() {
       </header>
       {/* On mobile, leave room for the fixed bottom navigation. */}
       <main
-        className={`mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8 ${
+        className={`mx-auto max-w-7xl px-4 py-6 sm:py-8 lg:px-8 ${
           isAuthenticated ? 'pb-28 md:pb-8' : ''
         }`}
       >
@@ -54,7 +54,10 @@ export default function App() {
               element={
                 <Suspense
                   fallback={
-                    <p role="status" className="text-slate-700">
+                    <p
+                      role="status"
+                      className="text-slate-700 dark:text-slate-300"
+                    >
                       Loading history…
                     </p>
                   }

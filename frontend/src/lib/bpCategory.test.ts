@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DIASTOLIC_ZONES, SYSTOLIC_ZONES, classify } from './bpCategory'
+import { categoryCounts, classify } from './bpCategory'
 
 describe('classify (2017 ACC/AHA categories)', () => {
   it.each([
@@ -19,22 +19,25 @@ describe('classify (2017 ACC/AHA categories)', () => {
   })
 })
 
-describe('zones', () => {
-  it('cover the whole axis without gaps or overlaps', () => {
-    for (const zones of [SYSTOLIC_ZONES, DIASTOLIC_ZONES]) {
-      expect(zones[0]?.from).toBeNull()
-      expect(zones[zones.length - 1]?.to).toBeNull()
-      zones.slice(1).forEach((zone, i) => {
-        expect(zone.from).toBe(zones[i]?.to)
-      })
-    }
+describe('categoryCounts', () => {
+  it('counts readings per category, using the more severe of the two values', () => {
+    expect(
+      categoryCounts([
+        { systolic: 118, diastolic: 76 },
+        { systolic: 115, diastolic: 70 },
+        { systolic: 125, diastolic: 75 },
+        { systolic: 118, diastolic: 85 },
+        { systolic: 150, diastolic: 70 },
+      ]),
+    ).toEqual({ normal: 2, elevated: 1, stage1: 1, stage2: 1 })
   })
 
-  it('have no "elevated" band for diastolic (it is defined by systolic only)', () => {
-    expect(DIASTOLIC_ZONES.map((z) => z.category)).toEqual([
-      'normal',
-      'stage1',
-      'stage2',
-    ])
+  it('is all zeros for no readings', () => {
+    expect(categoryCounts([])).toEqual({
+      normal: 0,
+      elevated: 0,
+      stage1: 0,
+      stage2: 0,
+    })
   })
 })
