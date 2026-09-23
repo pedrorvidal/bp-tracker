@@ -1,0 +1,96 @@
+name: Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.wp-env.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.wp-env.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/backend.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, static analysis and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+          coverage: none
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-${{ hashFiles('backend/composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
+
+      - name: Install Composer dependencies
+        id: install
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      # Every check below runs even if an earlier one failed, so a single run
+      # reports all problems at once. Any failed step still fails the job.
+      - name: Lint (phpcs)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: composer run lint
+
+      - name: Static analysis (PHPStan)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: composer run analyse
+
+      - name: Set up Node
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install wp-env
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        working-directory: .
+        run: npm ci
+
+      # The tests container mounts ./backend (including the vendor/ directory
+      # installed above) and provides the WordPress PHPUnit library and MySQL.
+      - name: Start wp-env
+        id: wp-env
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        working-directory: .
+        run: npx wp-env start
+
+      - name: Tests (PHPUnit)
+        if: ${{ !cancelled() && steps.wp-env.outcome == 'success' }}
+        working-directory: .
+        run: npx wp-env run tests-cli --env-cwd=wp-content/plugins/bp-tracker composer run test
