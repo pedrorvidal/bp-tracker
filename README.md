@@ -59,13 +59,13 @@ npx wp-env run tests-cli --env-cwd=wp-content/plugins/bp-tracker composer run te
 
 ### Frontend (`frontend/`)
 
-| Command                | What it runs                                                 |
-| ---------------------- | ------------------------------------------------------------ |
-| `npm run lint`         | ESLint (type-aware typescript-eslint, React hooks, jsx-a11y) |
-| `npm run typecheck`    | `tsc --noEmit` (strict mode)                                 |
-| `npm run format:check` | Prettier, without writing (`npm run format` fixes)           |
-| `npm run test`         | Vitest + Testing Library (jsdom)                             |
-| `npm run build`        | Production build into `frontend/dist/`                       |
+| Command                | What it runs                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------------- |
+| `npm run lint`         | ESLint (type-aware typescript-eslint, React hooks, jsx-a11y), zero warnings allowed |
+| `npm run typecheck`    | `tsc --noEmit` (strict mode)                                                        |
+| `npm run format:check` | Prettier, without writing (`npm run format` fixes)                                  |
+| `npm run test`         | Vitest + Testing Library (jsdom)                                                    |
+| `npm run build`        | Production build into `frontend/dist/`                                              |
 
 ## Continuous integration
 
@@ -128,3 +128,5 @@ The test site doesn't need this file, because `backend/tests/bootstrap.php` defi
 ## Authentication
 
 See [`docs/api.md`](docs/api.md) for the full request/response reference and `curl` examples for `login`, `refresh` and `logout`.
+
+The frontend signs in with these endpoints, refreshes the access token automatically on a `401`, and sends signed-out users to `/login`. See [`frontend/README.md`](frontend/README.md#authentication) for the details and the token storage trade-offs.

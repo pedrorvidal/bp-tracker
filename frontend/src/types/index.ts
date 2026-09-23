@@ -47,14 +47,7 @@ export interface ReadingStats {
   pulse_average: number | null
 }
 
-/** Response of POST /auth/login and POST /auth/refresh. */
-export interface AuthTokens {
-  access_token: string
-  refresh_token: string
-  token_type: 'Bearer'
-  /** Access token lifetime, in seconds. */
-  expires_in: number
-}
+export type { AuthSession, AuthTokens, AuthTokensResponse, User } from './auth'
 
 /** Standard WordPress REST error body. */
 export interface ApiErrorResponse {
