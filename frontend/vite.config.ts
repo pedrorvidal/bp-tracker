@@ -13,6 +13,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // A non-UTC zone with a fixed offset (-03:00, no DST), so date handling
+    // is exercised with a real offset and results are deterministic.
+    env: { TZ: 'America/Sao_Paulo' },
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
   },

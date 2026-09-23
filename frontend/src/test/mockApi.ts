@@ -6,7 +6,9 @@ import {
 } from 'axios'
 import { CSRF_HEADER, api } from '../lib/api'
 
-export type MockReply = { status: number; data?: unknown } | 'network-error'
+export type MockReply =
+  | { status: number; data?: unknown; headers?: Record<string, string> }
+  | 'network-error'
 
 type Handler =
   MockReply | ((call: RecordedCall) => MockReply | Promise<MockReply>)
@@ -91,7 +93,7 @@ export function mockApi(routes: Record<string, Handler | Handler[]>): MockApi {
       data: reply.data ?? null,
       status: reply.status,
       statusText: String(reply.status),
-      headers: {},
+      headers: reply.headers ?? {},
       config,
     }
 

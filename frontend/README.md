@@ -41,10 +41,51 @@ src/
   pages/       route-level screens
   hooks/       custom hooks (data fetching via TanStack Query)
   context/     React context providers (AuthProvider)
-  lib/         api client + interceptors, auth store and calls, query client
+  lib/         api client + interceptors, auth store and calls, query client,
+               date helpers, reading form validation
   types/       TypeScript interfaces shared with the API (Reading, AuthTokens, …)
   test/        Vitest setup, API mock adapter, fixtures, render helpers
 ```
+
+## Routes
+
+| Path       | Page                   | Access                                                     |
+| ---------- | ---------------------- | ---------------------------------------------------------- |
+| `/login`   | `pages/Login.tsx`      | Public; redirects signed-in users to where they were going |
+| `/new`     | `pages/NewReading.tsx` | Signed in                                                  |
+| `/account` | `pages/Account.tsx`    | Signed in; includes "Sign out of all devices"              |
+| `/`        | redirects to `/new`    | There is no dashboard yet                                  |
+
+Any other path redirects to `/`.
+
+## Readings
+
+### Hooks (`src/hooks/useReadings.ts`)
+
+| Hook                  | Request          | Returns                                                                           |
+| --------------------- | ---------------- | --------------------------------------------------------------------------------- |
+| `useReadings(query?)` | `GET /readings`  | `{ readings, total, totalPages }`; the totals come from the `X-WP-Total*` headers |
+| `useCreateReading()`  | `POST /readings` | The created `Reading`. On success, every readings query is invalidated.           |
+
+Query keys come from `readingsKeys` (`['readings', ...]`). Signing out clears the whole query cache.
+
+### New reading form (`src/pages/NewReading.tsx`)
+
+- **Mobile first:** fields are at least 48px tall with 18px text. Systolic/diastolic and pulse/weight sit side by side because they are short numbers. Numeric fields use `inputmode` to open the number keypad on phones.
+- **Validation before sending** (`src/lib/readingForm.ts`), with the same limits as the backend:
+  - systolic 60–250 and diastolic 40–150, both required;
+  - pulse 30–220, optional;
+  - weight, optional, a positive number (`72.5` or `72,5`);
+  - systolic must be higher than diastolic, which catches swapped values.
+
+  Invalid values never reach the API.
+
+- **Accessible errors:** each error and hint is linked to its input through `aria-describedby`, and invalid inputs get `aria-invalid`. Focus moves to the first invalid field. If the API rejects a field (`400 rest_invalid_param`), the error is shown on that field.
+- **After saving:** the form resets, with the date back to "now", and a confirmation appears in a `role="status"` region, so screen readers announce it.
+
+### Dates
+
+`<input type="datetime-local">` works in local time with no offset. Readings are sent as ISO 8601 **with the device's UTC offset**, for example `2026-09-23T07:45:00-03:00`, so the wall-clock time the user entered is kept (`src/lib/datetime.ts`). The tests run in `America/Sao_Paulo` (set in `vite.config.ts`), so the offset handling is exercised with a real non-zero offset.
 
 ## Authentication
 

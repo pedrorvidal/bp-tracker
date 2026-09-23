@@ -7,6 +7,10 @@ import { makeSession } from './test/fixtures'
 import { mockApi } from './test/mockApi'
 import { renderWithProviders } from './test/renderWithProviders'
 
+function newReadingHeading() {
+  return screen.getByRole('heading', { level: 2, name: 'New reading' })
+}
+
 describe('App', () => {
   it('renders the app shell with its landmarks', () => {
     renderWithProviders(<App />)
@@ -18,43 +22,67 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
-  it('shows the login page on "/" when signed out, without a sign-out button', () => {
+  it('shows the login page when signed out, without navigation or sign-out', () => {
     renderWithProviders(<App />)
 
     expect(
       screen.getByRole('heading', { level: 2, name: 'Sign in' }),
     ).toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Sign out' }),
     ).not.toBeInTheDocument()
   })
 
-  it('shows the home page when signed in', () => {
-    setSession(makeSession('a'))
+  it('protects /new', () => {
+    renderWithProviders(<App />, { route: '/new' })
 
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Sign in' }),
+    ).toBeInTheDocument()
+  })
+
+  it.each(['/', '/new', '/does-not-exist'])(
+    'shows the new-reading form on %s when signed in',
+    (route) => {
+      setSession(makeSession('a'))
+
+      renderWithProviders(<App />, { route })
+
+      expect(newReadingHeading()).toBeInTheDocument()
+    },
+  )
+
+  it('navigates between the new-reading form and the account page', async () => {
+    setSession(makeSession('a'))
     renderWithProviders(<App />)
 
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'New reading' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+
+    await userEvent.click(screen.getByRole('link', { name: 'Account' }))
+
     expect(
-      screen.getByRole('heading', { level: 2, name: 'Welcome, Ada Admin' }),
+      screen.getByRole('heading', { level: 2, name: 'Account' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(
+      screen.getByText('Signed in as Ada Admin (admin)'),
     ).toBeInTheDocument()
   })
 
-  it('redirects unknown paths home', () => {
-    setSession(makeSession('a'))
-
-    renderWithProviders(<App />, { route: '/does-not-exist' })
-
-    expect(
-      screen.getByRole('heading', { level: 2, name: 'Welcome, Ada Admin' }),
-    ).toBeInTheDocument()
-  })
-
-  it('offers "Sign out of all devices" on the home page', async () => {
+  it('offers "Sign out of all devices" on the account page', async () => {
     setSession(makeSession('a'))
     mockApi({
       'POST /auth/logout-all': { status: 200, data: { success: true } },
     })
-    renderWithProviders(<App />)
+    renderWithProviders(<App />, { route: '/account' })
 
     await userEvent.click(
       screen.getByRole('button', { name: 'Sign out of all devices' }),
