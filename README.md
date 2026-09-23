@@ -1,19 +1,82 @@
 # BP Tracker
 
+[![Backend](https://github.com/pedrorvidal/bp-tracker/actions/workflows/backend.yml/badge.svg)](https://github.com/pedrorvidal/bp-tracker/actions/workflows/backend.yml)
+[![Frontend](https://github.com/pedrorvidal/bp-tracker/actions/workflows/frontend.yml/badge.svg)](https://github.com/pedrorvidal/bp-tracker/actions/workflows/frontend.yml)
+
 Personal blood pressure tracker. Monorepo:
 
-- `backend/` — WordPress plugin (`bp-tracker`), mapped to `wp-content/plugins/bp-tracker` via `wp-env`.
-- `frontend/` — Vite + React + TypeScript single-page app (not Next.js).
-- `docs/` — project documentation (`architecture.md`, `api.md`).
+- `backend/`: WordPress plugin (`bp-tracker`), mapped to `wp-content/plugins/bp-tracker` via `wp-env`.
+- `frontend/`: Vite + React + TypeScript single-page app (not Next.js). See [`frontend/README.md`](frontend/README.md).
+- `docs/`: project documentation ([`api.md`](docs/api.md), `architecture.md`).
+
+## Requirements
+
+- Docker (for `wp-env`)
+- Node.js 22+ and npm
+- PHP 8.2+ and Composer 2 (for running the backend's lint and static analysis on the host)
 
 ## Local environment
 
+### Backend
+
 ```bash
-npm install
+npm install                        # installs wp-env
+(cd backend && composer install)
 npx wp-env start
 ```
 
-This starts a dev site (`http://localhost:8888`) and a test site (`http://localhost:8889`), both with the plugin active. See `backend/composer.json` for the `lint`/`analyse`/`test` scripts.
+This starts a dev site at `http://localhost:8888` and a test site at `http://localhost:8889`, both with the plugin active. Log in to the dev site with `admin` / `password`. See [Configuration](#configuration) for the two `wp-config.php` constants the API needs.
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.local         # optional; defaults to the local wp-env API
+npm run dev                        # http://localhost:5173
+```
+
+The dev server must run on port `5173`, because that is the only origin the API accepts cross-origin (see [`BP_TRACKER_FRONTEND_ORIGIN`](#bp_tracker_frontend_origin)).
+
+## Quality checks
+
+Every change must pass these checks locally before it is merged. CI runs the same commands.
+
+### Backend (`backend/`)
+
+| Command                 | What it runs                                                 |
+| ----------------------- | ------------------------------------------------------------ |
+| `composer run lint`     | phpcs with WordPress Coding Standards (`phpcs.xml.dist`)     |
+| `composer run lint:fix` | phpcbf, which auto-fixes what phpcs can                      |
+| `composer run analyse`  | PHPStan level 6 with `szepeviktor/phpstan-wordpress`         |
+| `composer run test`     | PHPUnit / WP-Unit; must run inside the wp-env test container |
+
+The tests need the WordPress test library and database from `wp-env`, so run them through the `tests-cli` container:
+
+```bash
+npx wp-env run tests-cli --env-cwd=wp-content/plugins/bp-tracker composer run test
+```
+
+### Frontend (`frontend/`)
+
+| Command                | What it runs                                                 |
+| ---------------------- | ------------------------------------------------------------ |
+| `npm run lint`         | ESLint (type-aware typescript-eslint, React hooks, jsx-a11y) |
+| `npm run typecheck`    | `tsc --noEmit` (strict mode)                                 |
+| `npm run format:check` | Prettier, without writing (`npm run format` fixes)           |
+| `npm run test`         | Vitest + Testing Library (jsdom)                             |
+| `npm run build`        | Production build into `frontend/dist/`                       |
+
+## Continuous integration
+
+GitHub Actions runs on pushes to `main` and on pull requests. Each workflow only triggers when its part of the repository changes.
+
+| Workflow                                         | Triggers on changes to                                           | Steps                                                                       |
+| ------------------------------------------------ | ---------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| [`backend.yml`](.github/workflows/backend.yml)   | `backend/**`, `.wp-env.json`, root `package*.json`, the workflow | `composer install`, lint, analyse, then tests inside `wp-env` (`tests-cli`) |
+| [`frontend.yml`](.github/workflows/frontend.yml) | `frontend/**`, the workflow                                      | `npm ci`, lint, typecheck, format check, tests, build                       |
+
+Every check in a workflow runs even when an earlier one fails, so a single run reports all problems. Any failed check fails the job.
 
 ## Configuration
 
@@ -45,7 +108,22 @@ For this namespace, the plugin (`BP_Tracker_CORS`) replaces WordPress core's def
 
 If the constant is left undefined, no origin is allowed. Same-origin requests and non-browser clients such as `curl` still work, but cross-origin browser requests are blocked. The frontend's dev server is pinned to port `5173` for this reason (see `frontend/vite.config.ts`).
 
-For local development, `.wp-env.override.json` (gitignored, never commit it) sets both constants for the `wp-env` dev site so `curl`/the frontend can hit `http://localhost:8888` right away — see `docs/api.md` for examples. Production/staging still need their own values defined directly in `wp-config.php`.
+For local development, create `.wp-env.override.json` at the repository root to set both constants for the `wp-env` dev site. The file is gitignored; never commit it. With it in place, `curl` and the frontend can call `http://localhost:8888` right away (see `docs/api.md` for examples). Then run `npx wp-env start` again.
+
+```json
+{
+  "env": {
+    "development": {
+      "config": {
+        "BP_TRACKER_JWT_SECRET": "paste-a-generated-secret-here",
+        "BP_TRACKER_FRONTEND_ORIGIN": "http://localhost:5173"
+      }
+    }
+  }
+}
+```
+
+The test site doesn't need this file, because `backend/tests/bootstrap.php` defines test values. Production and staging need their own values, defined directly in `wp-config.php`.
 
 ## Authentication
 

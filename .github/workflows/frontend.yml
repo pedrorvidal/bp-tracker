@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   checks:
-    name: Lint, type check and tests
+    name: Lint, type check, format, tests and build
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -53,6 +53,14 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run typecheck
 
+      - name: Format check (Prettier)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run format:check
+
       - name: Tests (Vitest)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run test
+
+      - name: Build (Vite)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run build

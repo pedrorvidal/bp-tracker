@@ -49,3 +49,7 @@ src/
 ## API client
 
 `src/lib/api.ts` exports a typed axios instance whose base URL is `VITE_API_URL`. A request interceptor adds `Authorization: Bearer <access_token>` whenever `setAccessToken()` (from `src/lib/authTokens.ts`) has been given a token.
+
+## Continuous integration
+
+[`.github/workflows/frontend.yml`](../.github/workflows/frontend.yml) runs `npm ci`, `lint`, `typecheck`, `format:check`, `test` and `build` on every push to `main` and pull request that touches `frontend/`. Run the same scripts locally before pushing.
