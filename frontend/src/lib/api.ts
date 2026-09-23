@@ -29,7 +29,12 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-const AUTH_PATHS = ['/auth/login', '/auth/refresh', '/auth/logout']
+const AUTH_PATHS = [
+  '/auth/login',
+  '/auth/refresh',
+  '/auth/logout',
+  '/auth/logout-all',
+]
 
 function isAuthPath(url: string | undefined): boolean {
   if (!url) {

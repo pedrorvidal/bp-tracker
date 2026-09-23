@@ -1,3 +1,4 @@
+import axios from 'axios'
 import type { AuthSession, AuthTokensResponse } from '../types'
 import { api, toSession } from './api'
 import { getAuthState, setSession } from './authStore'
@@ -46,12 +47,46 @@ export async function logout(): Promise<void> {
     // Best effort: server-side revocation failed, but the local session is
     // still cleared below.
   } finally {
-    setSession(null)
-
-    const channel = openChannel()
-    channel?.postMessage({ type: 'logout' } satisfies AuthMessage)
-    channel?.close()
+    endLocalSession()
   }
+}
+
+/**
+ * Signs the user out of every device: revokes all their sessions on the
+ * server, then ends this one (and every other open tab).
+ *
+ * Unlike logout(), this must not pretend to succeed: if the server can't be
+ * reached the other devices are still signed in, so the error is thrown and
+ * the session kept, letting the user retry. If the server rejects the
+ * request (the refresh cookie is no longer valid) the session is over
+ * anyway, so it is cleared before throwing.
+ *
+ * @throws AxiosError When the server didn't revoke the sessions.
+ */
+export async function logoutEverywhere(): Promise<void> {
+  try {
+    await api.post('/auth/logout-all')
+  } catch (error) {
+    if (
+      axios.isAxiosError(error) &&
+      error.response &&
+      error.response.status < 500
+    ) {
+      endLocalSession()
+    }
+    throw error
+  }
+
+  endLocalSession()
+}
+
+/** Clears the local session and tells other tabs to do the same. */
+function endLocalSession(): void {
+  setSession(null)
+
+  const channel = openChannel()
+  channel?.postMessage({ type: 'logout' } satisfies AuthMessage)
+  channel?.close()
 }
 
 /**

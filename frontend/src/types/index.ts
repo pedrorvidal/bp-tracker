@@ -62,5 +62,7 @@ export interface ApiErrorResponse {
   data: {
     status: number
     params?: Record<string, string> | string[]
+    /** Seconds until the next login attempt is allowed (429 responses). */
+    retry_after?: number
   }
 }

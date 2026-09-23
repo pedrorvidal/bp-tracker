@@ -27,6 +27,14 @@ function getErrorMessage(error: unknown): string {
   if (isApiError(error) && error.response?.status === 403) {
     return 'Invalid username or password.'
   }
+  if (isApiError(error) && error.response?.status === 429) {
+    const seconds = error.response.data.data.retry_after
+    if (typeof seconds === 'number' && seconds > 0) {
+      const minutes = Math.ceil(seconds / 60)
+      return `Too many failed attempts. Try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`
+    }
+    return 'Too many failed attempts. Try again later.'
+  }
   return 'Could not sign in. Check your connection and try again.'
 }
 

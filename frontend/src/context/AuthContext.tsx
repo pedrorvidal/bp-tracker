@@ -46,6 +46,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const logout = useCallback(() => authApi.logout(), [])
 
+  const logoutEverywhere = useCallback(() => authApi.logoutEverywhere(), [])
+
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
@@ -53,8 +55,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       isAuthenticated: status === 'authenticated',
       login,
       logout,
+      logoutEverywhere,
     }),
-    [status, session, login, logout],
+    [status, session, login, logout, logoutEverywhere],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

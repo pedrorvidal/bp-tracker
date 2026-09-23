@@ -10,6 +10,11 @@ export interface AuthContextValue {
   login: (username: string, password: string) => Promise<void>
   /** Revokes the session on the server (best effort) and always clears it locally. */
   logout: () => Promise<void>
+  /**
+   * Signs out of every device. Rejects (keeping the session) when the server
+   * couldn't revoke the other sessions.
+   */
+  logoutEverywhere: () => Promise<void>
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null)

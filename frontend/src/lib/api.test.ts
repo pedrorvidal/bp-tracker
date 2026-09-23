@@ -57,7 +57,7 @@ describe('request preparation', () => {
     expect(http.calls[0]?.authorization).toBeUndefined()
   })
 
-  it.each(['/auth/login', '/auth/refresh', '/auth/logout'])(
+  it.each(['/auth/login', '/auth/refresh', '/auth/logout', '/auth/logout-all'])(
     '%s: sends the refresh cookie and CSRF header, never a Bearer token',
     async (path) => {
       setSession(makeSession('a'))
@@ -280,7 +280,7 @@ describe('automatic refresh on 401', () => {
     expect(http.callsTo('GET /readings')).toHaveLength(2)
   })
 
-  it.each(['/auth/login', '/auth/refresh', '/auth/logout'])(
+  it.each(['/auth/login', '/auth/refresh', '/auth/logout', '/auth/logout-all'])(
     'does not refresh on a 401 from %s',
     async (path) => {
       setSession(makeSession('old'))

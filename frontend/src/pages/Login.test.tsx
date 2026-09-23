@@ -127,6 +127,32 @@ describe('Login page', () => {
     )
   })
 
+  it.each([
+    [125, 'Too many failed attempts. Try again in 3 minutes.'],
+    [30, 'Too many failed attempts. Try again in 1 minute.'],
+    [undefined, 'Too many failed attempts. Try again later.'],
+  ])(
+    'shows the lockout wait after a 429 (retry_after %s)',
+    async (retryAfter, message) => {
+      mockApi({
+        'POST /auth/login': {
+          status: 429,
+          data: {
+            code: 'bp_tracker_jwt_too_many_attempts',
+            message: 'Too many failed login attempts. Try again later.',
+            data: { status: 429, retry_after: retryAfter },
+          },
+        },
+      })
+      renderLogin()
+
+      await submit()
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(message)
+      expect(getSession()).toBeNull()
+    },
+  )
+
   it('clears the previous error when submitting again', async () => {
     mockApi({
       'POST /auth/login': [

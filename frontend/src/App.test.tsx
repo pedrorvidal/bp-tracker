@@ -49,6 +49,22 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
+  it('offers "Sign out of all devices" on the home page', async () => {
+    setSession(makeSession('a'))
+    mockApi({
+      'POST /auth/logout-all': { status: 200, data: { success: true } },
+    })
+    renderWithProviders(<App />)
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Sign out of all devices' }),
+    )
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Sign in' }),
+    ).toBeInTheDocument()
+  })
+
   it('signs out from the header and returns to the login page', async () => {
     setSession(makeSession('a'))
     mockApi({ 'POST /auth/logout': { status: 200, data: { success: true } } })
