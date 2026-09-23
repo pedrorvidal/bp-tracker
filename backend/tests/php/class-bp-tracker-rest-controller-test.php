@@ -317,5 +317,72 @@ class BP_Tracker_REST_Controller_Test extends WP_UnitTestCase {
 		$this->assertEqualsWithDelta( 120.0, $data['systolic_average'], 0.01 );
 		$this->assertEqualsWithDelta( 80.0, $data['diastolic_average'], 0.01 );
 		$this->assertEqualsWithDelta( 70.0, $data['pulse_average'], 0.01 );
+
+		// Extremes over the same readings (pulse only where recorded).
+		$this->assertSame( 110, $data['systolic_min'] );
+		$this->assertSame( 130, $data['systolic_max'] );
+		$this->assertSame( 70, $data['diastolic_min'] );
+		$this->assertSame( 90, $data['diastolic_max'] );
+		$this->assertSame( 60, $data['pulse_min'] );
+		$this->assertSame( 80, $data['pulse_max'] );
+	}
+
+	/**
+	 * A period without readings returns a zero count and null for every
+	 * average and extreme.
+	 */
+	public function test_stats_for_an_empty_period(): void {
+		wp_set_current_user( $this->user_id );
+		$this->create_reading_for(
+			$this->user_id,
+			array(
+				'reading_datetime' => '2026-09-10T08:00:00+00:00',
+				'systolic'         => 120,
+				'diastolic'        => 80,
+			)
+		);
+
+		$data = $this->dispatch(
+			'GET',
+			'/bp-tracker/v1/stats',
+			array(
+				'period_start' => '2026-01-01T00:00:00+00:00',
+				'period_end'   => '2026-01-31T23:59:59+00:00',
+			)
+		)->get_data();
+
+		$this->assertSame( 0, $data['count'] );
+		foreach ( array( 'systolic', 'diastolic', 'pulse' ) as $measure ) {
+			foreach ( array( 'average', 'min', 'max' ) as $stat ) {
+				$this->assertNull( $data[ "{$measure}_{$stat}" ], "{$measure}_{$stat}" );
+			}
+		}
+	}
+
+	/**
+	 * Without a period (lifetime), every reading of the user counts.
+	 */
+	public function test_stats_without_a_period_cover_all_readings(): void {
+		wp_set_current_user( $this->user_id );
+		foreach ( array(
+			'2020-01-01T08:00:00+00:00' => 150,
+			'2026-09-10T08:00:00+00:00' => 110,
+		) as $when => $systolic ) {
+			$this->create_reading_for(
+				$this->user_id,
+				array(
+					'reading_datetime' => $when,
+					'systolic'         => $systolic,
+					'diastolic'        => 80,
+				)
+			);
+		}
+
+		$data = $this->dispatch( 'GET', '/bp-tracker/v1/stats' )->get_data();
+
+		$this->assertSame( 2, $data['count'] );
+		$this->assertSame( 110, $data['systolic_min'] );
+		$this->assertSame( 150, $data['systolic_max'] );
+		$this->assertNull( $data['pulse_min'] );
 	}
 }

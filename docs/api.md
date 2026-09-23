@@ -4,18 +4,18 @@ REST endpoints exposed by the `bp-tracker` plugin. All routes live under the `bp
 
 Base URL in local dev: `http://localhost:8888/wp-json`.
 
-| Method   | Path                             | Auth required                | Description                      |
-| -------- | -------------------------------- | ---------------------------- | -------------------------------- |
-| `POST`   | `/bp-tracker/v1/auth/login`      | CSRF header                  | Exchange credentials for tokens  |
-| `POST`   | `/bp-tracker/v1/auth/refresh`    | Refresh cookie + CSRF header | Rotate the refresh token         |
-| `POST`   | `/bp-tracker/v1/auth/logout`     | Refresh cookie + CSRF header | Revoke the refresh token         |
-| `POST`   | `/bp-tracker/v1/auth/logout-all` | Refresh cookie + CSRF header | Sign out of every device         |
-| `GET`    | `/bp-tracker/v1/readings`        | Yes                          | List the caller's readings       |
-| `POST`   | `/bp-tracker/v1/readings`        | Yes                          | Create a reading                 |
-| `GET`    | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Get one reading                  |
-| `PUT`    | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Partially update a reading       |
-| `DELETE` | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Delete a reading                 |
-| `GET`    | `/bp-tracker/v1/stats`           | Yes                          | Averages and count over a period |
+| Method   | Path                             | Auth required                | Description                     |
+| -------- | -------------------------------- | ---------------------------- | ------------------------------- |
+| `POST`   | `/bp-tracker/v1/auth/login`      | CSRF header                  | Exchange credentials for tokens |
+| `POST`   | `/bp-tracker/v1/auth/refresh`    | Refresh cookie + CSRF header | Rotate the refresh token        |
+| `POST`   | `/bp-tracker/v1/auth/logout`     | Refresh cookie + CSRF header | Revoke the refresh token        |
+| `POST`   | `/bp-tracker/v1/auth/logout-all` | Refresh cookie + CSRF header | Sign out of every device        |
+| `GET`    | `/bp-tracker/v1/readings`        | Yes                          | List the caller's readings      |
+| `POST`   | `/bp-tracker/v1/readings`        | Yes                          | Create a reading                |
+| `GET`    | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Get one reading                 |
+| `PUT`    | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Partially update a reading      |
+| `DELETE` | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Delete a reading                |
+| `GET`    | `/bp-tracker/v1/stats`           | Yes                          | Averages, min/max and count     |
 
 ## Conventions
 
@@ -564,7 +564,12 @@ curl -s -X DELETE http://localhost:8888/wp-json/bp-tracker/v1/readings/7 \
 
 ### `GET /bp-tracker/v1/stats`
 
-Returns the systolic, diastolic and pulse averages and the reading count for the caller's own readings, optionally limited to a period. Averages are rounded to one decimal. They are sent as JSON numbers, so a whole value appears as `123`, not `123.0`. An average is `null` when there is no data for it. `pulse_average` only includes readings that have a pulse value.
+Returns the systolic, diastolic and pulse averages, minimums and maximums, and the reading count, for the caller's own readings. Without `period_start`/`period_end` it covers every reading; with them, only that period.
+
+- **Averages** are rounded to one decimal and sent as JSON numbers, so a whole value appears as `123`, not `123.0`.
+- **Minimums and maximums** are integers.
+- **Empty values:** any of these fields is `null` when there is no data for it.
+- **Pulse:** the `pulse_*` fields only include readings that have a pulse value.
 
 **Headers:** `Authorization: Bearer <access_token>`
 
@@ -587,7 +592,13 @@ curl -s "http://localhost:8888/wp-json/bp-tracker/v1/stats?period_start=2026-09-
   "count": 2,
   "systolic_average": 121,
   "diastolic_average": 79,
-  "pulse_average": 65
+  "pulse_average": 65,
+  "systolic_min": 118,
+  "systolic_max": 124,
+  "diastolic_min": 76,
+  "diastolic_max": 82,
+  "pulse_min": 65,
+  "pulse_max": 65
 }
 ```
 
@@ -598,7 +609,13 @@ When there are no readings in the period:
   "count": 0,
   "systolic_average": null,
   "diastolic_average": null,
-  "pulse_average": null
+  "pulse_average": null,
+  "systolic_min": null,
+  "systolic_max": null,
+  "diastolic_min": null,
+  "diastolic_max": null,
+  "pulse_min": null,
+  "pulse_max": null
 }
 ```
 

@@ -284,8 +284,8 @@ class BP_Tracker_REST_Controller extends WP_REST_Controller {
 	}
 
 	/**
-	 * Returns systolic/diastolic/pulse averages and a count for the current
-	 * user's readings within an optional period.
+	 * Returns systolic/diastolic/pulse averages, minimums and maximums and a
+	 * count for the current user's readings within an optional period.
 	 *
 	 * @param WP_REST_Request $request Current request.
 	 * @return WP_REST_Response
@@ -318,6 +318,12 @@ class BP_Tracker_REST_Controller extends WP_REST_Controller {
 				'systolic_average'  => self::average( $systolic ),
 				'diastolic_average' => self::average( $diastolic ),
 				'pulse_average'     => self::average( $pulse ),
+				'systolic_min'      => self::minimum( $systolic ),
+				'systolic_max'      => self::maximum( $systolic ),
+				'diastolic_min'     => self::minimum( $diastolic ),
+				'diastolic_max'     => self::maximum( $diastolic ),
+				'pulse_min'         => self::minimum( $pulse ),
+				'pulse_max'         => self::maximum( $pulse ),
 			)
 		);
 	}
@@ -477,6 +483,26 @@ class BP_Tracker_REST_Controller extends WP_REST_Controller {
 		}
 
 		return round( array_sum( $values ) / count( $values ), 1 );
+	}
+
+	/**
+	 * Smallest of a list of numbers.
+	 *
+	 * @param int[] $values Values.
+	 * @return int|null Null when $values is empty.
+	 */
+	private static function minimum( array $values ): ?int {
+		return $values ? min( $values ) : null;
+	}
+
+	/**
+	 * Largest of a list of numbers.
+	 *
+	 * @param int[] $values Values.
+	 * @return int|null Null when $values is empty.
+	 */
+	private static function maximum( array $values ): ?int {
+		return $values ? max( $values ) : null;
 	}
 
 	/**
