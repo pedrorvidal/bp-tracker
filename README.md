@@ -127,12 +127,15 @@ The test site doesn't need this file, because `backend/tests/bootstrap.php` defi
 
 ## Authentication
 
-See [`docs/api.md`](docs/api.md) for the full request/response reference and `curl` examples for `login`, `refresh` and `logout`.
+See [`docs/api.md`](docs/api.md) for the full request/response reference and `curl` examples for `login`, `refresh`, `logout` and `logout-all`.
 
 In short:
 
 - the refresh token lives only in an `HttpOnly; SameSite=Strict` cookie scoped to `/auth/*`, which JavaScript can't read;
-- the access token lives in memory;
-- the `/auth/*` routes require an `X-BP-Tracker-CSRF: 1` header.
+- the access token lives in memory and expires after 15 minutes;
+- the `/auth/*` routes require an `X-BP-Tracker-CSRF: 1` header;
+- failed logins are rate limited, per account + IP, per IP and per account, and the response is `429` with a wait time;
+- changing the password, or "sign out of all devices" (`POST /auth/logout-all`), revokes every session of the user immediately;
+- expired refresh tokens are purged daily by WP-Cron.
 
 The frontend restores the session on page load from that cookie, refreshes automatically on a `401`, and sends signed-out users to `/login`. See [`frontend/README.md`](frontend/README.md#authentication) for the details, including the requirement that the frontend and the API share a site.

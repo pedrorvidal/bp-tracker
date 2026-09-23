@@ -4,17 +4,18 @@ REST endpoints exposed by the `bp-tracker` plugin. All routes live under the `bp
 
 Base URL in local dev: `http://localhost:8888/wp-json`.
 
-| Method   | Path                           | Auth required                | Description                      |
-| -------- | ------------------------------ | ---------------------------- | -------------------------------- |
-| `POST`   | `/bp-tracker/v1/auth/login`    | CSRF header                  | Exchange credentials for tokens  |
-| `POST`   | `/bp-tracker/v1/auth/refresh`  | Refresh cookie + CSRF header | Rotate the refresh token         |
-| `POST`   | `/bp-tracker/v1/auth/logout`   | Refresh cookie + CSRF header | Revoke the refresh token         |
-| `GET`    | `/bp-tracker/v1/readings`      | Yes                          | List the caller's readings       |
-| `POST`   | `/bp-tracker/v1/readings`      | Yes                          | Create a reading                 |
-| `GET`    | `/bp-tracker/v1/readings/{id}` | Yes (owner)                  | Get one reading                  |
-| `PUT`    | `/bp-tracker/v1/readings/{id}` | Yes (owner)                  | Partially update a reading       |
-| `DELETE` | `/bp-tracker/v1/readings/{id}` | Yes (owner)                  | Delete a reading                 |
-| `GET`    | `/bp-tracker/v1/stats`         | Yes                          | Averages and count over a period |
+| Method   | Path                             | Auth required                | Description                      |
+| -------- | -------------------------------- | ---------------------------- | -------------------------------- |
+| `POST`   | `/bp-tracker/v1/auth/login`      | CSRF header                  | Exchange credentials for tokens  |
+| `POST`   | `/bp-tracker/v1/auth/refresh`    | Refresh cookie + CSRF header | Rotate the refresh token         |
+| `POST`   | `/bp-tracker/v1/auth/logout`     | Refresh cookie + CSRF header | Revoke the refresh token         |
+| `POST`   | `/bp-tracker/v1/auth/logout-all` | Refresh cookie + CSRF header | Sign out of every device         |
+| `GET`    | `/bp-tracker/v1/readings`        | Yes                          | List the caller's readings       |
+| `POST`   | `/bp-tracker/v1/readings`        | Yes                          | Create a reading                 |
+| `GET`    | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Get one reading                  |
+| `PUT`    | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Partially update a reading       |
+| `DELETE` | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Delete a reading                 |
+| `GET`    | `/bp-tracker/v1/stats`           | Yes                          | Averages and count over a period |
 
 ## Conventions
 
@@ -98,7 +99,7 @@ All datetimes are ISO 8601 / RFC 3339 strings with a timezone offset, for exampl
 
 Authentication is built into the plugin (`backend/includes/class-bp-tracker-jwt-auth.php`) and needs no third-party plugin.
 
-- **Access token:** an HS256-signed JWT returned in the JSON body. It expires after 1 hour (`expires_in: 3600`). Send it as `Authorization: Bearer <access_token>` to the readings and stats routes. Browsers should keep it in memory only.
+- **Access token:** an HS256-signed JWT returned in the JSON body. It expires after 15 minutes (`expires_in: 900`); the short lifetime bounds how long a leaked token stays usable, and refreshing is transparent to users. Send it as `Authorization: Bearer <access_token>` to the readings and stats routes. Browsers should keep it in memory only.
 - **Refresh token:** 32 random bytes, hex-encoded, valid for 30 days. It is **never in a response body**. The server sets it in a cookie that JavaScript can't read:
 
   ```
@@ -115,6 +116,12 @@ Authentication is built into the plugin (`backend/includes/class-bp-tracker-jwt-
   On the server, only a SHA-256 hash of each refresh token is stored (`wp_bp_tracker_refresh_tokens`). Every refresh consumes the presented token atomically and issues a new one, so each token works once, even when two requests present it at the same moment.
 
 - **CSRF protection:** the browser sends the cookie automatically, so every `/auth/*` route requires the header `X-BP-Tracker-CSRF: 1`. A custom header forces a CORS preflight, which only `BP_TRACKER_FRONTEND_ORIGIN` passes. Without the header, the response is `403 bp_tracker_jwt_missing_csrf_header`.
+- **Session revocation:** each access token carries the user's _session generation_ (`gen` claim). Revoking all of a user's sessions increments it, so every access token issued before is rejected immediately (`401 bp_tracker_jwt_invalid_token`), and all their refresh tokens are deleted. This happens:
+  - when the password changes (reset, profile screen, WP-CLI, `wp_set_password()`);
+  - on `POST /auth/logout-all` ("sign out of all devices").
+
+  Deleting a user deletes their refresh tokens too. A daily WP-Cron job (`bp_tracker_purge_expired_refresh_tokens`) deletes expired refresh tokens; it is removed when the plugin is deactivated.
+
 - **No Bearer on `/auth/*`:** any request with an invalid or expired `Authorization: Bearer` header is rejected with `401 bp_tracker_jwt_invalid_token` before it reaches the route. Clients must not send one to `/auth/*`, which is exactly when a stale access token is likely.
 
 The login and refresh responses share one shape:
@@ -123,7 +130,7 @@ The login and refresh responses share one shape:
 {
   "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
   "token_type": "Bearer",
-  "expires_in": 3600,
+  "expires_in": 900,
   "user": { "id": 1, "username": "admin", "display_name": "Ada Admin" }
 }
 ```
@@ -166,12 +173,36 @@ curl -s -c cookies.txt -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/
 | ------ | ------------------------------------ | -------------------------------- |
 | `400`  | `rest_missing_callback_param`        | `username` or `password` missing |
 | `403`  | `bp_tracker_jwt_invalid_credentials` | Wrong username or password       |
+| `429`  | `bp_tracker_jwt_too_many_attempts`   | Too many failed attempts (below) |
 
 ```json
 {
   "code": "bp_tracker_jwt_invalid_credentials",
   "message": "Invalid username or password.",
   "data": { "status": 403 }
+}
+```
+
+**Rate limiting.** Failed logins are counted in three buckets, each over a fixed 15-minute window:
+
+| Bucket           | Limit | Purpose                                                                         |
+| ---------------- | ----- | ------------------------------------------------------------------------------- |
+| account + IP     | 5     | Stops brute force without letting an attacker lock the real user out everywhere |
+| IP (any account) | 20    | Stops one address from trying many accounts                                     |
+| account (any IP) | 50    | Stops distributed attacks on one account                                        |
+
+- **While a bucket is full,** every attempt gets `429`, **even with the correct password**, because the lock is checked before the password.
+- **The account** is identified by login name or email, which count as one account. Unknown usernames are counted the same way, so the response doesn't reveal which accounts exist.
+- **A successful login** resets that account's buckets but not the IP bucket.
+- **The client IP** is `REMOTE_ADDR`. Behind a reverse proxy, set the real client IP with the `bp_tracker_client_ip` filter. Only do that when the header comes from your own proxy.
+
+The response includes a `Retry-After` header. The same value is also in the body, because browsers don't expose `Retry-After` to cross-origin JavaScript:
+
+```json
+{
+  "code": "bp_tracker_jwt_too_many_attempts",
+  "message": "Too many failed login attempts. Try again later.",
+  "data": { "status": 429, "retry_after": 812 }
 }
 ```
 
@@ -221,7 +252,30 @@ curl -s -b cookies.txt -c cookies.txt -X POST http://localhost:8888/wp-json/bp-t
 { "success": true }
 ```
 
-The response is `200` even without a cookie, or with a token that was already revoked, so logging out twice is safe. It only revokes the presented token; the user's other sessions (other devices) are untouched.
+The response is `200` even without a cookie, or with a token that was already revoked, so logging out twice is safe. It only revokes the presented token; the user's other sessions (other devices) are untouched. Use `logout-all` to end those too.
+
+### `POST /bp-tracker/v1/auth/logout-all`
+
+Signs the cookie's owner out of **every device**. It deletes all of their refresh tokens and invalidates every access token issued so far, including this device's, then clears the cookie. Like logout, it is authenticated by the refresh cookie, not by an access token. The request has no body.
+
+**Headers:** `X-BP-Tracker-CSRF: 1`, plus the `bp_tracker_refresh` cookie
+
+```bash
+curl -s -b cookies.txt -c cookies.txt -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/logout-all \
+  -H "X-BP-Tracker-CSRF: 1"
+```
+
+**Success: `200 OK`.** The response includes `Set-Cookie: bp_tracker_refresh=; …; Max-Age=0`. `revoked_sessions` counts the refresh tokens deleted:
+
+```json
+{ "success": true, "revoked_sessions": 3 }
+```
+
+**Errors:**
+
+| Status | `code`                                 | Cause                                                                             |
+| ------ | -------------------------------------- | --------------------------------------------------------------------------------- |
+| `401`  | `bp_tracker_jwt_invalid_refresh_token` | No valid refresh cookie, so the caller can't be identified and nothing is revoked |
 
 ---
 

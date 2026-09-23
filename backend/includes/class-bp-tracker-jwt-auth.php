@@ -29,9 +29,12 @@ class BP_Tracker_JWT_Auth {
 	/**
 	 * Access token lifetime, in seconds.
 	 *
+	 * Short, since a JWT can't be revoked individually: it bounds how long a
+	 * leaked access token stays usable. Refreshing is transparent to users.
+	 *
 	 * @var int
 	 */
-	const ACCESS_TOKEN_TTL = HOUR_IN_SECONDS;
+	const ACCESS_TOKEN_TTL = 15 * MINUTE_IN_SECONDS;
 
 	/**
 	 * Refresh token lifetime, in seconds.
@@ -177,6 +180,16 @@ class BP_Tracker_JWT_Auth {
 				'permission_callback' => array( __CLASS__, 'require_csrf_header' ),
 			)
 		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
+			'/auth/logout-all',
+			array(
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( __CLASS__, 'handle_logout_all' ),
+				'permission_callback' => array( __CLASS__, 'require_csrf_header' ),
+			)
+		);
 	}
 
 	/**
@@ -188,16 +201,29 @@ class BP_Tracker_JWT_Auth {
 	public static function handle_login( WP_REST_Request $request ): WP_REST_Response|WP_Error {
 		$username = (string) $request->get_param( 'username' );
 		$password = (string) $request->get_param( 'password' );
+		$ip       = BP_Tracker_Login_Throttle::client_ip();
+
+		// Checked before the password, so a correct guess can't be confirmed
+		// while locked out.
+		$retry_after = BP_Tracker_Login_Throttle::retry_after( $username, $ip );
+
+		if ( $retry_after > 0 ) {
+			return self::too_many_attempts_response( $retry_after );
+		}
 
 		$user = wp_authenticate( $username, $password );
 
 		if ( is_wp_error( $user ) ) {
+			BP_Tracker_Login_Throttle::record_failure( $username, $ip );
+
 			return new WP_Error(
 				'bp_tracker_jwt_invalid_credentials',
 				__( 'Invalid username or password.', 'bp-tracker' ),
 				array( 'status' => 403 )
 			);
 		}
+
+		BP_Tracker_Login_Throttle::clear_account( $username, $ip );
 
 		try {
 			return self::token_response( $user );
@@ -281,6 +307,62 @@ class BP_Tracker_JWT_Auth {
 
 		$response = new WP_REST_Response( array( 'success' => true ), 200 );
 		$response->header( 'Set-Cookie', self::build_refresh_cookie( '', 0 ) );
+
+		return $response;
+	}
+
+	/**
+	 * Handles POST /auth/logout-all: signs the user out of every device.
+	 *
+	 * Authenticated by the refresh cookie, like logout. Deletes all of the
+	 * user's refresh tokens and rejects every access token issued so far.
+	 *
+	 * @return WP_REST_Response
+	 */
+	public static function handle_logout_all(): WP_REST_Response {
+		$refresh_token = self::get_refresh_cookie();
+		$row           = null === $refresh_token ? null : self::find_valid_refresh_token( $refresh_token );
+
+		if ( null === $row ) {
+			return self::invalid_refresh_response();
+		}
+
+		$revoked = BP_Tracker_Sessions::revoke_all( (int) $row->user_id );
+
+		$response = new WP_REST_Response(
+			array(
+				'success'          => true,
+				'revoked_sessions' => $revoked,
+			),
+			200
+		);
+		$response->header( 'Set-Cookie', self::build_refresh_cookie( '', 0 ) );
+
+		return $response;
+	}
+
+	/**
+	 * Builds the 429 returned while a login is rate limited.
+	 *
+	 * The wait is also in the body: browsers don't expose Retry-After to
+	 * cross-origin JavaScript unless it is CORS-exposed.
+	 *
+	 * @param int $retry_after Seconds until the next attempt is allowed.
+	 * @return WP_REST_Response
+	 */
+	private static function too_many_attempts_response( int $retry_after ): WP_REST_Response {
+		$response = new WP_REST_Response(
+			array(
+				'code'    => 'bp_tracker_jwt_too_many_attempts',
+				'message' => __( 'Too many failed login attempts. Try again later.', 'bp-tracker' ),
+				'data'    => array(
+					'status'      => 429,
+					'retry_after' => $retry_after,
+				),
+			),
+			429
+		);
+		$response->header( 'Retry-After', (string) $retry_after );
 
 		return $response;
 	}
@@ -433,6 +515,7 @@ class BP_Tracker_JWT_Auth {
 			'exp'     => $issued_at + self::ACCESS_TOKEN_TTL,
 			'jti'     => wp_generate_uuid4(),
 			'user_id' => $user_id,
+			'gen'     => BP_Tracker_Sessions::generation( $user_id ),
 		);
 
 		return JWT::encode( $payload, self::get_secret(), 'HS256' );
@@ -503,7 +586,7 @@ class BP_Tracker_JWT_Auth {
 	 *
 	 * @return string
 	 */
-	private static function table_name(): string {
+	public static function table_name(): string {
 		global $wpdb;
 
 		return $wpdb->prefix . 'bp_tracker_refresh_tokens';
@@ -558,7 +641,15 @@ class BP_Tracker_JWT_Auth {
 
 		$decoded_user_id = isset( $decoded->user_id ) ? (int) $decoded->user_id : 0;
 
-		if ( $decoded_user_id <= 0 || ! get_userdata( $decoded_user_id ) ) {
+		// Tokens from a revoked session generation (or issued before
+		// generations existed) are rejected.
+		$generation = isset( $decoded->gen ) && is_int( $decoded->gen ) ? $decoded->gen : -1;
+
+		if (
+			$decoded_user_id <= 0
+			|| ! get_userdata( $decoded_user_id )
+			|| BP_Tracker_Sessions::generation( $decoded_user_id ) !== $generation
+		) {
 			self::$auth_error = self::invalid_token_error();
 			return $user_id;
 		}

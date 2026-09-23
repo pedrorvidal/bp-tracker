@@ -176,7 +176,7 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 		$this->assertArrayHasKey( 'access_token', $data );
 		$this->assertArrayNotHasKey( 'refresh_token', $data, 'The refresh token must never be readable by JavaScript.' );
 		$this->assertSame( 'Bearer', $data['token_type'] );
-		$this->assertSame( HOUR_IN_SECONDS, $data['expires_in'] );
+		$this->assertSame( 15 * MINUTE_IN_SECONDS, $data['expires_in'] );
 		$this->assertSame(
 			array(
 				'id'           => $this->user_id,
@@ -293,9 +293,10 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 	 */
 	public static function provide_auth_routes(): array {
 		return array(
-			'login'   => array( '/bp-tracker/v1/auth/login' ),
-			'refresh' => array( '/bp-tracker/v1/auth/refresh' ),
-			'logout'  => array( '/bp-tracker/v1/auth/logout' ),
+			'login'      => array( '/bp-tracker/v1/auth/login' ),
+			'refresh'    => array( '/bp-tracker/v1/auth/refresh' ),
+			'logout'     => array( '/bp-tracker/v1/auth/logout' ),
+			'logout-all' => array( '/bp-tracker/v1/auth/logout-all' ),
 		);
 	}
 
