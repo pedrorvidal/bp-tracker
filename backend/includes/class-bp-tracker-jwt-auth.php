@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class BP_Tracker_JWT_Auth {
 
 	/**
-	 * REST namespace every auth route (and the CORS headers below) lives under.
+	 * REST namespace every auth route lives under.
 	 *
 	 * @var string
 	 */
@@ -72,7 +72,6 @@ class BP_Tracker_JWT_Auth {
 		add_action( 'rest_api_init', array( __CLASS__, 'register_routes' ) );
 		add_filter( 'determine_current_user', array( __CLASS__, 'validate_token' ), 20 );
 		add_filter( 'rest_authentication_errors', array( __CLASS__, 'maybe_return_auth_error' ) );
-		add_filter( 'rest_pre_serve_request', array( __CLASS__, 'maybe_send_cors_headers' ), 20, 4 );
 	}
 
 	/**
@@ -498,40 +497,6 @@ class BP_Tracker_JWT_Auth {
 		}
 
 		return self::$auth_error ?? $result;
-	}
-
-	/**
-	 * Sends restrictive CORS headers for the plugin's own REST namespace only.
-	 *
-	 * @param bool             $served  Whether the request has already been served.
-	 * @param WP_REST_Response|WP_Error|mixed $result  Response to send.
-	 * @param WP_REST_Request  $request Current request.
-	 * @param WP_REST_Server   $server  Server instance.
-	 * @return bool
-	 */
-	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- signature must match the "rest_pre_serve_request" filter.
-	public static function maybe_send_cors_headers( bool $served, mixed $result, WP_REST_Request $request, WP_REST_Server $server ): bool {
-		if ( ! str_starts_with( $request->get_route(), '/' . self::REST_NAMESPACE . '/' ) ) {
-			return $served;
-		}
-
-		if ( ! defined( 'BP_TRACKER_FRONTEND_ORIGIN' ) || '' === constant( 'BP_TRACKER_FRONTEND_ORIGIN' ) ) {
-			return $served;
-		}
-
-		$allowed_origin = (string) constant( 'BP_TRACKER_FRONTEND_ORIGIN' );
-		$origin         = get_http_origin();
-
-		if ( $origin && untrailingslashit( $origin ) === untrailingslashit( $allowed_origin ) ) {
-			header( 'Access-Control-Allow-Origin: ' . $origin );
-			header( 'Access-Control-Allow-Credentials: true' );
-			header( 'Vary: Origin', false );
-		}
-
-		header( 'Access-Control-Allow-Methods: GET, POST, OPTIONS' );
-		header( 'Access-Control-Allow-Headers: Authorization, Content-Type' );
-
-		return $served;
 	}
 }
 

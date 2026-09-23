@@ -71,6 +71,21 @@ Example of `rest_invalid_param` (out-of-range value):
 
 Parameters are validated before permissions are checked. A request with invalid parameters therefore gets a `400` even when it has no valid token.
 
+### CORS
+
+Browsers may call the `bp-tracker/v1` namespace cross-origin only from the origin set in `BP_TRACKER_FRONTEND_ORIGIN` (see the README). That origin must match exactly: scheme, host and port. For that origin, every response, including the `OPTIONS` preflight, carries:
+
+```
+Access-Control-Allow-Origin: http://localhost:5173
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+Access-Control-Allow-Headers: Authorization, Content-Type
+Access-Control-Max-Age: 600
+Access-Control-Expose-Headers: X-WP-Total, X-WP-TotalPages, Link
+Vary: Origin
+```
+
+Any other origin gets no `Access-Control-Allow-*` headers, so the browser blocks the request. `Access-Control-Allow-Credentials` is never sent. Authenticate with the `Authorization: Bearer` header, not cookies, and don't use `credentials: 'include'` or `withCredentials: true`.
+
 ### Dates
 
 All datetimes are ISO 8601 / RFC 3339 strings with a timezone offset, for example `2026-09-22T08:30:00+00:00`. In a query string, URL-encode the `+` as `%2B`.

@@ -35,13 +35,15 @@ Treat it like any other credential: never commit it, and rotating it immediately
 
 ### `BP_TRACKER_FRONTEND_ORIGIN`
 
-The frontend's origin (scheme + host + port, no trailing slash), used to scope CORS headers on the `bp-tracker/v1` REST namespace only:
+The frontend's origin: scheme, host and port, with no trailing slash. It is the only origin allowed to call the `bp-tracker/v1` REST namespace cross-origin:
 
 ```php
 define( 'BP_TRACKER_FRONTEND_ORIGIN', 'http://localhost:5173' );
 ```
 
-If left undefined, no CORS headers are added for the namespace (same-origin requests still work; cross-origin browser requests won't).
+For this namespace, the plugin (`BP_Tracker_CORS`) replaces WordPress core's default CORS behavior. By default, core reflects any origin with credentials allowed. Only an exact match on scheme, host and port gets `Access-Control-Allow-*` headers, so `http://localhost:5174` or `https://localhost:5173` are rejected. Credentials (cookies) are never allowed, because the API authenticates with Bearer tokens. Other namespaces such as `wp/v2` keep core's behavior.
+
+If the constant is left undefined, no origin is allowed. Same-origin requests and non-browser clients such as `curl` still work, but cross-origin browser requests are blocked. The frontend's dev server is pinned to port `5173` for this reason (see `frontend/vite.config.ts`).
 
 For local development, `.wp-env.override.json` (gitignored, never commit it) sets both constants for the `wp-env` dev site so `curl`/the frontend can hit `http://localhost:8888` right away — see `docs/api.md` for examples. Production/staging still need their own values defined directly in `wp-config.php`.
 
