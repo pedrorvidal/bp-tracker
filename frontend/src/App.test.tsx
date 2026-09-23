@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import App from './App'
@@ -34,12 +34,50 @@ describe('App', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('protects /new', () => {
-    renderWithProviders(<App />, { route: '/new' })
+  it.each(['/new', '/history', '/account'])('protects %s', (route) => {
+    renderWithProviders(<App />, { route })
 
     expect(
       screen.getByRole('heading', { level: 2, name: 'Sign in' }),
     ).toBeInTheDocument()
+  })
+
+  it('links New reading, History and Account in the main navigation', async () => {
+    setSession(makeSession('a'))
+    mockApi({
+      'GET /readings': {
+        status: 200,
+        data: [],
+        headers: { 'x-wp-totalpages': '0' },
+      },
+      'GET /stats': {
+        status: 200,
+        data: {
+          count: 0,
+          systolic_average: null,
+          diastolic_average: null,
+          pulse_average: null,
+        },
+      },
+    })
+    renderWithProviders(<App />)
+
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((link) => link.textContent),
+    ).toEqual(['New reading', 'History', 'Account'])
+
+    await userEvent.click(within(nav).getByRole('link', { name: 'History' }))
+
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'History' }),
+    ).toBeInTheDocument()
+    expect(within(nav).getByRole('link', { name: 'History' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
   })
 
   it.each(['/', '/new', '/does-not-exist'])(

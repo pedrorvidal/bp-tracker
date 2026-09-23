@@ -1,14 +1,11 @@
-import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
+import MainNav from './components/MainNav'
 import ProtectedRoute, { LOGIN_PATH } from './components/ProtectedRoute'
 import { useAuth } from './hooks/useAuth'
 import Account from './pages/Account'
+import History from './pages/History'
 import Login from './pages/Login'
 import NewReading from './pages/NewReading'
-
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
-    isActive ? 'bg-blue-50 text-blue-800' : 'text-slate-700 hover:bg-slate-100'
-  }`
 
 export default function App() {
   const { isAuthenticated, user, logout } = useAuth()
@@ -33,28 +30,23 @@ export default function App() {
             </div>
           )}
           {isAuthenticated && (
-            <nav aria-label="Main" className="w-full">
-              <ul className="flex gap-2">
-                <li>
-                  <NavLink to="/new" className={navLinkClass}>
-                    New reading
-                  </NavLink>
-                </li>
-                <li>
-                  <NavLink to="/account" className={navLinkClass}>
-                    Account
-                  </NavLink>
-                </li>
-              </ul>
-            </nav>
+            <div className="md:w-full">
+              <MainNav />
+            </div>
           )}
         </div>
       </header>
-      <main className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
+      {/* On mobile, leave room for the fixed bottom navigation. */}
+      <main
+        className={`mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8 ${
+          isAuthenticated ? 'pb-28 md:pb-8' : ''
+        }`}
+      >
         <Routes>
           <Route path={LOGIN_PATH} element={<Login />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/new" element={<NewReading />} />
+            <Route path="/history" element={<History />} />
             <Route path="/account" element={<Account />} />
           </Route>
           {/* No dashboard yet: the home page is the new-reading form. */}

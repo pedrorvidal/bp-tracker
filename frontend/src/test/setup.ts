@@ -20,3 +20,13 @@ afterEach(async () => {
   setSession(null)
   window.localStorage.clear()
 })
+
+// jsdom has no ResizeObserver; recharts' ResponsiveContainer needs one.
+if (!('ResizeObserver' in globalThis)) {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  globalThis.ResizeObserver = ResizeObserverStub
+}

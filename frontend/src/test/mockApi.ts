@@ -23,6 +23,8 @@ export interface RecordedCall {
   csrf: string | undefined
   /** Whether cookies (the refresh cookie) would be sent. */
   withCredentials: boolean
+  /** Query-string params passed to axios, if any. */
+  params: Record<string, unknown>
 }
 
 export interface MockApi {
@@ -66,6 +68,7 @@ export function mockApi(routes: Record<string, Handler | Handler[]>): MockApi {
         typeof authorization === 'string' ? authorization : undefined,
       csrf: typeof csrf === 'string' ? csrf : undefined,
       withCredentials: config.withCredentials === true,
+      params: (config.params ?? {}) as Record<string, unknown>,
     }
     calls.push(call)
 

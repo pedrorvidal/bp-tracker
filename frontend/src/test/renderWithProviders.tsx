@@ -11,9 +11,16 @@ interface Options {
 }
 
 /** A wrapper with the same providers as main.tsx and an in-memory router. */
+/** A query client for tests: no retries, so error states show up at once. */
+export function createTestQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+}
+
 export function createWrapper({
   route = '/',
-  queryClient = new QueryClient(),
+  queryClient = createTestQueryClient(),
 }: Options = {}) {
   return function Providers({ children }: { children: ReactNode }) {
     return (

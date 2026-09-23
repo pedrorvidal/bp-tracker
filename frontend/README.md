@@ -47,25 +47,31 @@ src/
   test/        Vitest setup, API mock adapter, fixtures, render helpers
 ```
 
-## Routes
+## Routes and navigation
 
 | Path       | Page                   | Access                                                     |
 | ---------- | ---------------------- | ---------------------------------------------------------- |
 | `/login`   | `pages/Login.tsx`      | Public; redirects signed-in users to where they were going |
 | `/new`     | `pages/NewReading.tsx` | Signed in                                                  |
+| `/history` | `pages/History.tsx`    | Signed in                                                  |
 | `/account` | `pages/Account.tsx`    | Signed in; includes "Sign out of all devices"              |
 | `/`        | redirects to `/new`    | There is no dashboard yet                                  |
 
 Any other path redirects to `/`.
 
+`components/MainNav.tsx` links New reading, History and Account. On mobile it is a bar fixed to the bottom of the screen, within thumb reach, and `main` gets bottom padding so content isn't hidden behind it. From `md` up it sits in the header. "Sign out" stays in the header at every size.
+
 ## Readings
 
 ### Hooks (`src/hooks/useReadings.ts`)
 
-| Hook                  | Request          | Returns                                                                           |
-| --------------------- | ---------------- | --------------------------------------------------------------------------------- |
-| `useReadings(query?)` | `GET /readings`  | `{ readings, total, totalPages }`; the totals come from the `X-WP-Total*` headers |
-| `useCreateReading()`  | `POST /readings` | The created `Reading`. On success, every readings query is invalidated.           |
+| Hook                      | Request                     | Returns                                                                                       |
+| ------------------------- | --------------------------- | --------------------------------------------------------------------------------------------- |
+| `useReadings(query?)`     | `GET /readings`             | `{ readings, total, totalPages }`; the totals come from the `X-WP-Total*` headers             |
+| `useCreateReading()`      | `POST /readings`            | The created `Reading`. On success, every readings query is invalidated.                       |
+| `useAllReadings(period)`  | `GET /readings`, every page | Every reading in the period, newest first (100 per page; remaining pages fetched in parallel) |
+| `useReadingStats(period)` | `GET /stats`                | `ReadingStats` for the period                                                                 |
+| `useDeleteReading()`      | `DELETE /readings/{id}`     | On success, readings and stats queries are invalidated                                        |
 
 Query keys come from `readingsKeys` (`['readings', ...]`). Signing out clears the whole query cache.
 
@@ -82,6 +88,18 @@ Query keys come from `readingsKeys` (`['readings', ...]`). Signing out clears th
 
 - **Accessible errors:** each error and hint is linked to its input through `aria-describedby`, and invalid inputs get `aria-invalid`. Focus moves to the first invalid field. If the API rejects a field (`400 rest_invalid_param`), the error is shown on that field.
 - **After saving:** the form resets, with the date back to "now", and a confirmation appears in a `role="status"` region, so screen readers announce it.
+
+### History page (`src/pages/History.tsx`)
+
+- **Period filter:** 7 or 30 days, 30 by default (`components/PeriodFilter.tsx`, toggle buttons with `aria-pressed`). The period is made of whole local days, from midnight `N - 1` days ago to 23:59:59 today (`lib/period.ts`). The bounds stay the same all day, so query keys don't change on every render, and readings added later today still fall inside the period.
+- **Summary:** averages from `GET /stats` (`components/StatsSummary.tsx`), with "—" when there is no data.
+- **Chart** (`components/ReadingsChart.tsx`, Recharts):
+  - systolic and diastolic over time on one mmHg axis;
+  - colors from a validated categorical palette, with a legend in reading order and direct labels at the end of each line;
+  - round ticks with headroom, and a tooltip with a crosshair;
+  - with fewer than two readings, a message replaces the chart.
+- **List** (`components/ReadingList.tsx`): cards on mobile and a table from `md` up, newest first. Both are rendered and CSS hides one; the hidden one is also hidden from screen readers. The list doubles as the chart's table view.
+- **Delete:** a button per reading, with an accessible name that identifies the reading. It asks for confirmation (`window.confirm`), then deletes, refreshes the list and averages, and announces "Reading deleted." in a `role="status"` region.
 
 ### Dates
 
