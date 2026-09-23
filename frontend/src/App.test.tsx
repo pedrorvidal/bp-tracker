@@ -72,7 +72,7 @@ describe('App', () => {
     await userEvent.click(within(nav).getByRole('link', { name: 'History' }))
 
     expect(
-      screen.getByRole('heading', { level: 2, name: 'History' }),
+      await screen.findByRole('heading', { level: 2, name: 'History' }),
     ).toBeInTheDocument()
     expect(within(nav).getByRole('link', { name: 'History' })).toHaveAttribute(
       'aria-current',

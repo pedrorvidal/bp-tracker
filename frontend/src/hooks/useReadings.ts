@@ -31,7 +31,11 @@ export const readingsKeys = {
   stats: (query: PeriodQuery) => ['readings', 'stats', query] as const,
 }
 
-/** Period filter accepted by GET /readings and GET /stats. */
+/**
+ * Period filter accepted by GET /readings and GET /stats. Both bounds are
+ * optional; without them (lifetime) every reading counts. The period is part
+ * of every query key, so changing it refetches.
+ */
 export type PeriodQuery = Pick<ReadingsQuery, 'period_start' | 'period_end'>
 
 /** Largest page the API serves. */
@@ -74,7 +78,7 @@ export function useReadings(
  * fetched in parallel.
  */
 export function useAllReadings(
-  query: PeriodQuery,
+  query: PeriodQuery = {},
 ): UseQueryResult<Reading[], AxiosError<ApiErrorResponse>> {
   return useQuery({
     queryKey: readingsKeys.allInPeriod(query),
@@ -101,12 +105,19 @@ export function useAllReadings(
   })
 }
 
-/** Averages and count for a period (GET /stats). */
-export function useReadingStats(
-  query: PeriodQuery,
+/**
+ * Averages, extremes and count for a period (GET /stats).
+ *
+ * `enabled: false` skips the request (e.g. there's no previous period to
+ * compare lifetime with).
+ */
+export function useStats(
+  query: PeriodQuery = {},
+  { enabled = true }: { enabled?: boolean } = {},
 ): UseQueryResult<ReadingStats, AxiosError<ApiErrorResponse>> {
   return useQuery({
     queryKey: readingsKeys.stats(query),
+    enabled,
     queryFn: async ({ signal }) => {
       const { data } = await api.get<ReadingStats>('/stats', {
         params: query,

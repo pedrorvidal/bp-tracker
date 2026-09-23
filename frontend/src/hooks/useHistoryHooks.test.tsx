@@ -10,7 +10,7 @@ import {
   readingsKeys,
   useAllReadings,
   useDeleteReading,
-  useReadingStats,
+  useStats,
 } from './useReadings'
 
 const PERIOD = {
@@ -80,7 +80,7 @@ describe('useAllReadings', () => {
   })
 })
 
-describe('useReadingStats', () => {
+describe('useStats', () => {
   it('fetches /stats for the period', async () => {
     setSession(makeSession('a'))
     const stats = {
@@ -91,7 +91,7 @@ describe('useReadingStats', () => {
     }
     const http = mockApi({ 'GET /stats': { status: 200, data: stats } })
 
-    const { result } = renderHook(() => useReadingStats(PERIOD), {
+    const { result } = renderHook(() => useStats(PERIOD), {
       wrapper: createWrapper(),
     })
 

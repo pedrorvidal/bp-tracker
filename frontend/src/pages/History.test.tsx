@@ -1,11 +1,11 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setSession } from '../lib/authStore'
-import { makeSession } from '../test/fixtures'
+import { makeSession, makeStats } from '../test/fixtures'
 import { mockApi, restError, type RecordedCall } from '../test/mockApi'
 import { renderWithProviders } from '../test/renderWithProviders'
-import type { Reading, ReadingStats } from '../types'
+import type { Reading } from '../types'
 import History from './History'
 
 // Tests run in America/Sao_Paulo (UTC-3); see vite.config.ts.
@@ -51,12 +51,14 @@ const READINGS: Reading[] = [
   },
 ]
 
-const STATS: ReadingStats = {
+const STATS = makeStats({
   count: 3,
   systolic_average: 124.3,
   diastolic_average: 80,
   pulse_average: 68,
-}
+  systolic_min: 118,
+  systolic_max: 134,
+})
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'], now: NOW })
@@ -154,17 +156,11 @@ describe('History', () => {
     })
 
     it('shows an empty state linking to the new-reading form', async () => {
-      mockHistory([], {
-        ...STATS,
-        count: 0,
-        systolic_average: null,
-        diastolic_average: null,
-        pulse_average: null,
-      })
+      mockHistory([], makeStats())
       renderWithProviders(<History />)
 
       expect(
-        await screen.findByText(/No readings in the last 30 days\./),
+        await screen.findByText(/No readings for last 30 days\./),
       ).toBeInTheDocument()
       expect(
         screen.getByRole('link', { name: 'Record a reading' }),
@@ -194,31 +190,41 @@ describe('History', () => {
     })
   })
 
-  describe('summary', () => {
-    it('shows the averages and count for the period', async () => {
+  describe('layout', () => {
+    it('stacks period selector, summary, chart and list, in that order', async () => {
+      mockHistory()
+      renderWithProviders(<History />)
+      await waitFor(() => {
+        expect(cards()).toHaveLength(3)
+      })
+
+      const order = [
+        screen.getByRole('group', { name: 'Period' }),
+        screen.getByRole('region', { name: 'Summary, last 30 days' }),
+        screen.getByRole('figure', { name: 'Blood pressure, last 30 days' }),
+        screen.getByRole('heading', { name: 'Readings' }),
+      ]
+      for (let i = 1; i < order.length; i++) {
+        const before = order[i - 1] as HTMLElement
+        const after = order[i] as HTMLElement
+        expect(
+          before.compareDocumentPosition(after) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy()
+      }
+    })
+
+    it('shows the summary of the selected period', async () => {
       mockHistory()
       renderWithProviders(<History />)
 
       const summary = await screen.findByRole('region', {
-        name: 'Averages, last 30 days',
+        name: 'Summary, last 30 days',
       })
       await waitFor(() => {
-        expect(summary).toHaveTextContent('124.3/80mmHg')
+        expect(summary).toHaveTextContent('124.3 mmHg average')
       })
-      expect(summary).toHaveTextContent('Pulse68bpm')
-      expect(summary).toHaveTextContent('Readings3')
-    })
-
-    it('shows a dash for averages with no data', async () => {
-      mockHistory(READINGS, { ...STATS, pulse_average: null })
-      renderWithProviders(<History />)
-
-      const summary = await screen.findByRole('region', {
-        name: 'Averages, last 30 days',
-      })
-      await waitFor(() => {
-        expect(summary).toHaveTextContent('Pulse—bpm')
-      })
+      expect(summary).toHaveTextContent('Min 118 · Max 134')
     })
   })
 
@@ -235,7 +241,7 @@ describe('History', () => {
         'true',
       )
       expect(periodCalls(http.calls, 'GET /readings')).toEqual([PERIOD_30])
-      expect(periodCalls(http.calls, 'GET /stats')).toEqual([PERIOD_30])
+      expect(periodCalls(http.calls, 'GET /stats')).toContainEqual(PERIOD_30)
     })
 
     it('switching to 7 days queries readings and stats with the new period', async () => {
@@ -253,10 +259,7 @@ describe('History', () => {
           PERIOD_7,
         ])
       })
-      expect(periodCalls(http.calls, 'GET /stats')).toEqual([
-        PERIOD_30,
-        PERIOD_7,
-      ])
+      expect(periodCalls(http.calls, 'GET /stats')).toContainEqual(PERIOD_7)
       expect(screen.getByRole('button', { name: '7 days' })).toHaveAttribute(
         'aria-pressed',
         'true',
@@ -266,8 +269,54 @@ describe('History', () => {
         'false',
       )
       expect(
-        await screen.findByRole('region', { name: 'Averages, last 7 days' }),
+        await screen.findByRole('region', { name: 'Summary, last 7 days' }),
       ).toBeInTheDocument()
+    })
+
+    it('lifetime queries readings and stats without a period', async () => {
+      const http = mockHistory()
+      renderWithProviders(<History />)
+      await waitFor(() => {
+        expect(cards()).toHaveLength(3)
+      })
+
+      await userEvent.click(screen.getByRole('button', { name: 'Lifetime' }))
+
+      await waitFor(() => {
+        expect(http.callsTo('GET /readings').at(-1)?.params).toEqual({
+          per_page: 100,
+          page: 1,
+        })
+      })
+      expect(http.callsTo('GET /stats').at(-1)?.params).toEqual({})
+      expect(
+        await screen.findByRole('region', { name: 'Summary, all time' }),
+      ).toBeInTheDocument()
+    })
+
+    it('a custom range queries its whole days', async () => {
+      const http = mockHistory()
+      renderWithProviders(<History />)
+      await waitFor(() => {
+        expect(cards()).toHaveLength(3)
+      })
+
+      await userEvent.click(screen.getByRole('button', { name: 'Custom' }))
+      fireEvent.change(screen.getByLabelText('From'), {
+        target: { value: '2026-09-01' },
+      })
+      fireEvent.change(screen.getByLabelText('To'), {
+        target: { value: '2026-09-15' },
+      })
+
+      const custom = {
+        period_start: '2026-09-01T00:00:00-03:00',
+        period_end: '2026-09-15T23:59:59-03:00',
+      }
+      await waitFor(() => {
+        expect(periodCalls(http.calls, 'GET /readings')).toContainEqual(custom)
+      })
+      expect(periodCalls(http.calls, 'GET /stats')).toContainEqual(custom)
     })
 
     it('fetches all pages for the chart (100 per page)', async () => {
@@ -291,19 +340,10 @@ describe('History', () => {
 
       expect(
         await screen.findByRole('figure', {
-          name: 'Blood pressure, last 30 days (mmHg)',
+          name: 'Blood pressure, last 30 days',
         }),
       ).toBeInTheDocument()
-    })
-
-    it('asks for more readings when there are fewer than two points', async () => {
-      mockHistory([READINGS[0] as Reading])
-      renderWithProviders(<History />)
-
-      const figure = await screen.findByRole('figure')
-      expect(figure).toHaveTextContent(
-        'Record at least two readings in this period to see a trend.',
-      )
+      expect(screen.getByText('Showing 3 readings.')).toBeInTheDocument()
     })
   })
 

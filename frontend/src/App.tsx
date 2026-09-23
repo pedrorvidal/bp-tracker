@@ -1,11 +1,14 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import MainNav from './components/MainNav'
 import ProtectedRoute, { LOGIN_PATH } from './components/ProtectedRoute'
 import { useAuth } from './hooks/useAuth'
 import Account from './pages/Account'
-import History from './pages/History'
 import Login from './pages/Login'
 import NewReading from './pages/NewReading'
+
+// The history page carries the charting library: load it only when visited.
+const History = lazy(() => import('./pages/History'))
 
 export default function App() {
   const { isAuthenticated, user, logout } = useAuth()
@@ -46,7 +49,20 @@ export default function App() {
           <Route path={LOGIN_PATH} element={<Login />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/new" element={<NewReading />} />
-            <Route path="/history" element={<History />} />
+            <Route
+              path="/history"
+              element={
+                <Suspense
+                  fallback={
+                    <p role="status" className="text-slate-700">
+                      Loading history…
+                    </p>
+                  }
+                >
+                  <History />
+                </Suspense>
+              }
+            />
             <Route path="/account" element={<Account />} />
           </Route>
           {/* No dashboard yet: the home page is the new-reading form. */}

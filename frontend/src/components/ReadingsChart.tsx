@@ -1,106 +1,44 @@
-import { useId } from 'react'
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-  type LabelProps,
-} from 'recharts'
-import { formatDateTime } from '../lib/format'
-import type { Period } from '../lib/period'
+import { useId, useState } from 'react'
+import { AGGREGATE_THRESHOLD, chartPoints } from '../lib/aggregate'
+import { DIASTOLIC_ZONES, SYSTOLIC_ZONES } from '../lib/bpCategory'
+import { describeRange, parseDateInput, type DateRange } from '../lib/dateRange'
 import type { Reading } from '../types'
-
-/**
- * Series colors: slots 1 and 2 of the validated categorical palette
- * (CVD ΔE 24.7, normal-vision ΔE 33.6, both >= 3:1 on white). Text never uses
- * them: labels, ticks and the legend use slate text colors.
- */
-const SERIES = {
-  systolic: { name: 'Systolic', color: '#2a78d6' },
-  diastolic: { name: 'Diastolic', color: '#eb6834' },
-} as const
-
-const TEXT = '#334155' // slate-700
-const MUTED = '#475569' // slate-600
-const GRID = '#e2e8f0' // slate-200
+import BpPanel from './BpPanel'
+import ChartLegend from './ChartLegend'
 
 interface ReadingsChartProps {
   readings: Reading[]
-  period: Period
-  days: number
+  range: DateRange
 }
 
-interface Point {
-  time: number
-  systolic: number
-  diastolic: number
+const WEEK = 7 * 24 * 60 * 60 * 1000
+
+/** X range for an empty chart: the selected period, or the last week. */
+function emptyDomain(range: DateRange): [number, number] {
+  const start = range.start ? parseDateInput(range.start) : null
+  const end = range.end ? parseDateInput(range.end) : null
+  const now = Date.now()
+  return [start?.getTime() ?? now - WEEK, (end?.getTime() ?? now) + WEEK / 7]
 }
 
-/** Day ticks: every day for short periods, weekly for longer ones. */
-function dayTicks(period: Period, days: number): number[] {
-  const step = days <= 7 ? 1 : 7
-  const ticks: number[] = []
-  for (let offset = 0; offset < days; offset += step) {
-    const day = new Date(period.start)
-    day.setDate(day.getDate() + offset)
-    ticks.push(day.getTime())
-  }
-  return ticks
-}
+const linkButtonClass =
+  'font-medium text-blue-800 underline hover:text-blue-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700'
 
-function shortDay(time: number): string {
-  return new Date(time).toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-  })
-}
-
-/** Direct label naming the series at its last point. */
-function endLabel(name: string, lastIndex: number) {
-  return function EndLabel({ x, y, index }: LabelProps & { index?: number }) {
-    if (index !== lastIndex || typeof x !== 'number' || typeof y !== 'number') {
-      return null
-    }
-    return (
-      <text x={x + 10} y={y} dy={4} fill={TEXT} fontSize={12}>
-        {name}
-      </text>
-    )
-  }
-}
-
-/** Systolic and diastolic over the selected period, oldest to newest. */
-export default function ReadingsChart({
-  readings,
-  period,
-  days,
-}: ReadingsChartProps) {
+/**
+ * Systolic and diastolic over time, in two panels sharing the time axis, each
+ * on its own clinical reference bands (the categories use different
+ * thresholds per measure, so one set of bands can't be right for both
+ * lines). A Brush below zooms both panels. Above AGGREGATE_THRESHOLD
+ * readings the chart shows daily averages unless the user asks otherwise.
+ */
+export default function ReadingsChart({ readings, range }: ReadingsChartProps) {
   const captionId = useId()
-  const points: Point[] = readings
-    .map((reading) => ({
-      time: Date.parse(reading.reading_datetime),
-      systolic: reading.systolic,
-      diastolic: reading.diastolic,
-    }))
-    .sort((a, b) => a.time - b.time)
-
-  const values = points.flatMap((p) => [p.systolic, p.diastolic])
-  // Round ticks every 10 mmHg (20 for wide ranges), with at least 5 mmHg of
-  // headroom so no point sits on the plot's edge.
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const step = max - min > 50 ? 20 : 10
-  const low = Math.floor((min - 5) / step) * step
-  const high = Math.ceil((max + 5) / step) * step
-  const yTicks: number[] = []
-  for (let tick = low; tick <= high; tick += step) {
-    yTicks.push(tick)
-  }
-  const lastIndex = points.length - 1
+  const [showEveryReading, setShowEveryReading] = useState(false)
+  const { points, aggregated } = chartPoints(readings, showEveryReading)
+  const many = readings.length > AGGREGATE_THRESHOLD
+  const domain = emptyDomain(range)
+  // Remount the panels when the plotted data changes, resetting the Brush.
+  const dataKey = `${points.length}-${points[0]?.time ?? 0}-${aggregated}`
 
   return (
     <figure
@@ -111,90 +49,67 @@ export default function ReadingsChart({
         id={captionId}
         className="text-base font-semibold text-slate-900 sm:text-lg"
       >
-        Blood pressure, last {days} days (mmHg)
+        Blood pressure, {describeRange(range)}
       </figcaption>
 
-      {points.length < 2 ? (
-        <p className="mt-2 text-slate-700">
-          Record at least two readings in this period to see a trend.
-        </p>
-      ) : (
-        <div className="mt-2 h-64 md:h-80">
-          <ResponsiveContainer
-            width="100%"
-            height="100%"
-            initialDimension={{ width: 320, height: 256 }}
-          >
-            <LineChart
-              data={points}
-              margin={{ top: 8, right: 72, bottom: 0, left: 0 }}
+      <p aria-live="polite" className="mt-1 text-sm text-slate-600">
+        {readings.length === 0 && 'No readings in this period.'}
+        {readings.length > 0 &&
+          !many &&
+          `Showing ${readings.length} ${readings.length === 1 ? 'reading' : 'readings'}.`}
+        {aggregated && (
+          <>
+            Showing daily averages ({points.length} days, {readings.length}{' '}
+            readings).{' '}
+            <button
+              type="button"
+              onClick={() => setShowEveryReading(true)}
+              className={linkButtonClass}
             >
-              <CartesianGrid stroke={GRID} vertical={false} />
-              <XAxis
-                dataKey="time"
-                type="number"
-                scale="time"
-                domain={[period.start.getTime(), period.end.getTime() + 1000]}
-                ticks={dayTicks(period, days)}
-                tickFormatter={shortDay}
-                tick={{ fill: MUTED, fontSize: 12 }}
-                stroke={GRID}
-                minTickGap={8}
-              />
-              <YAxis
-                domain={[low, high]}
-                ticks={yTicks}
-                allowDecimals={false}
-                width={36}
-                tick={{ fill: MUTED, fontSize: 12 }}
-                stroke={GRID}
-              />
-              <Tooltip
-                cursor={{ stroke: MUTED, strokeDasharray: '4 4' }}
-                labelFormatter={(time) =>
-                  formatDateTime(new Date(Number(time)).toISOString())
-                }
-                formatter={(value, name) => [`${String(value)} mmHg`, name]}
-                contentStyle={{ borderRadius: 8, borderColor: GRID }}
-                labelStyle={{ color: TEXT, fontWeight: 600 }}
-                itemStyle={{ color: TEXT }}
-              />
-              <Legend
-                verticalAlign="top"
-                align="left"
-                height={32}
-                iconType="plainline"
-                // Systolic first, as the value is read (120/80), not alphabetical.
-                itemSorter={(item) =>
-                  item.value === SERIES.systolic.name ? 0 : 1
-                }
-                formatter={(value: string) => (
-                  <span style={{ color: TEXT, fontSize: 13 }}>{value}</span>
-                )}
-              />
-              {(['systolic', 'diastolic'] as const).map((key) => (
-                <Line
-                  key={key}
-                  type="linear"
-                  dataKey={key}
-                  name={SERIES[key].name}
-                  stroke={SERIES[key].color}
-                  strokeWidth={2}
-                  dot={{
-                    r: 4,
-                    strokeWidth: 2,
-                    fill: '#ffffff',
-                    stroke: SERIES[key].color,
-                  }}
-                  activeDot={{ r: 6, stroke: '#ffffff', strokeWidth: 2 }}
-                  label={endLabel(SERIES[key].name, lastIndex)}
-                  isAnimationActive={false}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
+              Show every reading
+            </button>
+          </>
+        )}
+        {many && !aggregated && (
+          <>
+            Showing every reading ({readings.length}).{' '}
+            <button
+              type="button"
+              onClick={() => setShowEveryReading(false)}
+              className={linkButtonClass}
+            >
+              Show daily averages
+            </button>
+          </>
+        )}
+      </p>
+
+      <div key={dataKey} className="mt-2">
+        <p className="text-sm font-medium text-slate-800">Systolic</p>
+        <BpPanel
+          measure="systolic"
+          points={points}
+          zones={SYSTOLIC_ZONES}
+          baseDomain={[100, 160]}
+          emptyDomain={domain}
+          showTooltip
+          isBottom={false}
+          className="h-40 md:h-52"
+        />
+        <p className="mt-2 text-sm font-medium text-slate-800">Diastolic</p>
+        <BpPanel
+          measure="diastolic"
+          points={points}
+          zones={DIASTOLIC_ZONES}
+          baseDomain={[60, 100]}
+          emptyDomain={domain}
+          showTooltip={false}
+          isBottom
+          className="h-52 md:h-64"
+        />
+      </div>
+
+      <ChartLegend />
     </figure>
   )
 }

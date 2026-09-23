@@ -65,13 +65,13 @@ Any other path redirects to `/`.
 
 ### Hooks (`src/hooks/useReadings.ts`)
 
-| Hook                      | Request                     | Returns                                                                                       |
-| ------------------------- | --------------------------- | --------------------------------------------------------------------------------------------- |
-| `useReadings(query?)`     | `GET /readings`             | `{ readings, total, totalPages }`; the totals come from the `X-WP-Total*` headers             |
-| `useCreateReading()`      | `POST /readings`            | The created `Reading`. On success, every readings query is invalidated.                       |
-| `useAllReadings(period)`  | `GET /readings`, every page | Every reading in the period, newest first (100 per page; remaining pages fetched in parallel) |
-| `useReadingStats(period)` | `GET /stats`                | `ReadingStats` for the period                                                                 |
-| `useDeleteReading()`      | `DELETE /readings/{id}`     | On success, readings and stats queries are invalidated                                        |
+| Hook                             | Request                     | Returns                                                                                                            |
+| -------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `useReadings(query?)`            | `GET /readings`             | `{ readings, total, totalPages }`; the totals come from the `X-WP-Total*` headers                                  |
+| `useCreateReading()`             | `POST /readings`            | The created `Reading`. On success, every readings query is invalidated.                                            |
+| `useAllReadings(period?)`        | `GET /readings`, every page | Every reading in the period (or lifetime), newest first (100 per page; remaining pages fetched in parallel)        |
+| `useStats(period?, { enabled })` | `GET /stats`                | `ReadingStats` for the period (averages, min/max, count); no period = lifetime; `enabled: false` skips the request |
+| `useDeleteReading()`             | `DELETE /readings/{id}`     | On success, readings and stats queries are invalidated                                                             |
 
 Query keys come from `readingsKeys` (`['readings', ...]`). Signing out clears the whole query cache.
 
@@ -91,15 +91,23 @@ Query keys come from `readingsKeys` (`['readings', ...]`). Signing out clears th
 
 ### History page (`src/pages/History.tsx`)
 
-- **Period filter:** 7 or 30 days, 30 by default (`components/PeriodFilter.tsx`, toggle buttons with `aria-pressed`). The period is made of whole local days, from midnight `N - 1` days ago to 23:59:59 today (`lib/period.ts`). The bounds stay the same all day, so query keys don't change on every render, and readings added later today still fall inside the period.
-- **Summary:** averages from `GET /stats` (`components/StatsSummary.tsx`), with "—" when there is no data.
-- **Chart** (`components/ReadingsChart.tsx`, Recharts):
-  - systolic and diastolic over time on one mmHg axis;
-  - colors from a validated categorical palette, with a legend in reading order and direct labels at the end of each line;
-  - round ticks with headroom, and a tooltip with a crosshair;
-  - with fewer than two readings, a message replaces the chart.
-- **List** (`components/ReadingList.tsx`): cards on mobile and a table from `md` up, newest first. Both are rendered and CSS hides one; the hidden one is also hidden from screen readers. The list doubles as the chart's table view.
-- **Delete:** a button per reading, with an accessible name that identifies the reading. It asks for confirmation (`window.confirm`), then deletes, refreshes the list and averages, and announces "Reading deleted." in a `role="status"` region.
+Top to bottom, stacked on mobile: period selector, summary, chart, then the list of readings. The selected period lives in `History` as a `DateRange` (`lib/dateRange.ts`): whole local days, both ends inclusive, as `YYYY-MM-DD`, with `{ start: null, end: null }` meaning lifetime. `rangeToParams()` turns it into `period_start`/`period_end`, from midnight of the first day to 23:59:59 of the last, with the local offset. Lifetime sends no params. The period is part of every query key, so changing it refetches readings and stats.
+
+- **`components/PeriodSelector.tsx`:**
+  - presets for 7, 10, 30 and 90 days and Lifetime, as toggle buttons with `aria-pressed`;
+  - **Custom**, with two native `<input type="date">` fields, capped at today, and an accessible error when the start is after the end;
+  - it emits `{ start, end }` only when the range is valid.
+- **`components/SummaryCard.tsx`:**
+  - average, minimum and maximum of systolic, diastolic and pulse from `GET /stats`;
+  - each average compared with the **previous period of the same length** (e.g. the 30 days before the last 30), as an absolute change in words, such as "3.8 mmHg lower than the previous 30 days";
+  - the comparison is omitted, with a short note, when the previous period has fewer than `MIN_READINGS_TO_COMPARE` (3) readings. It is also omitted for a measure missing from either period, and for lifetime.
+- **`components/ReadingsChart.tsx`:** two panels sharing the time axis, `BpPanel` for systolic above and diastolic below, each on its own **reference bands**. The categories use different thresholds per measure (systolic 120/130/140, diastolic 80/90), and one set of horizontal bands can't be right for both lines on a shared mmHg axis.
+  - **Bands:** status tints at low opacity, each named beside the plot, with a legend (`ChartLegend.tsx`). The legend states that the bands are the 2017 ACC/AHA categories for reference, not a diagnosis. The bands are drawn even when there is no data.
+  - **Line colors:** systolic violet and diastolic blue (`chartSeries.ts`, validated pair). Red is avoided because it would disappear into the red "Stage 2" band.
+  - **Zoom:** a `Brush` under the bottom panel zooms and pans both panels (`syncId`). The crosshair is synced too, and the tooltip (`ChartTooltip.tsx`) shows time, both pressures, pulse and the reading's category.
+  - **Auto-aggregation:** above `AGGREGATE_THRESHOLD` (100) readings in the period, the chart plots **daily averages** (`lib/aggregate.ts`, by local day) and says so, with a **Show every reading** button that switches back and forth.
+  - **Dots** are drawn up to 31 points; above that only the lines, to avoid clutter on phones.
+- **List:** cards on mobile and a table from `md` up, with delete and confirmation, as before.
 
 ### Dates
 

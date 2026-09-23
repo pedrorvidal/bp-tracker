@@ -39,12 +39,18 @@ export interface ReadingsQuery {
   period_end?: string
 }
 
-/** Response of GET /stats. Averages are null when there is no data. */
+/** Response of GET /stats. Every statistic is null when there is no data. */
 export interface ReadingStats {
   count: number
   systolic_average: number | null
   diastolic_average: number | null
   pulse_average: number | null
+  systolic_min: number | null
+  systolic_max: number | null
+  diastolic_min: number | null
+  diastolic_max: number | null
+  pulse_min: number | null
+  pulse_max: number | null
 }
 
 export type {
