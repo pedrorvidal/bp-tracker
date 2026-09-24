@@ -31,6 +31,7 @@ Accounts go through an approval step. The plugin adds two roles (`backend/includ
 - **Nobody gets `edit_others_bp_readings` or `delete_others_bp_readings`.** On top of that, every `/readings/{id}` route checks ownership explicitly, so even an administrator only reaches their own readings through the API.
 - **The `bp_reading` post type has its own capabilities** (`capability_type` `bp_reading`/`bp_readings`, with `map_meta_cap`). Generic roles such as `author` or `subscriber` have none of them, and get `403` on every readings route.
 - **Administrators** get the five reading capabilities above (not the `*_others_*` ones).
+- **App users stay in the app.** For `bp_tracker_pending` and `bp_tracker_user` (never administrators), any REST route outside `bp-tracker/v1` returns `403 bp_tracker_forbidden_route` ("This route is not available for your account."), and wp-admin redirects to the frontend. See [`architecture.md`](architecture.md#user-roles-and-approval-flow).
 - **Demotion ends sessions.** Giving a user the pending role again revokes all of their sessions (same as _Session revocation_ below), and `refresh` refuses pending users as a backstop.
 - **Installation:** the roles are created on activation and, for sites where the plugin is already active, on the first request after an update (`bp_tracker_roles_version` option). Deactivation removes both roles and the administrators' capabilities. Users keep the role name, so reactivating restores their access.
 

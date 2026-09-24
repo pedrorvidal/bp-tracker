@@ -136,7 +136,7 @@ class BP_Tracker_CORS {
 	 *
 	 * @return string The configured origin, or '' when not configured.
 	 */
-	private static function get_allowed_origin(): string {
+	public static function get_allowed_origin(): string {
 		if ( ! defined( 'BP_TRACKER_FRONTEND_ORIGIN' ) ) {
 			return '';
 		}
