@@ -2,6 +2,27 @@
 
 [![Backend](https://github.com/pedrorvidal/bp-tracker/actions/workflows/backend.yml/badge.svg)](https://github.com/pedrorvidal/bp-tracker/actions/workflows/backend.yml)
 [![Frontend](https://github.com/pedrorvidal/bp-tracker/actions/workflows/frontend.yml/badge.svg)](https://github.com/pedrorvidal/bp-tracker/actions/workflows/frontend.yml)
+[![Dependabot](https://img.shields.io/badge/Dependabot-enabled-025E8C?logo=dependabot&logoColor=white)](.github/dependabot.yml)
+[![License](https://img.shields.io/badge/license-GPL--2.0--or--later-blue)](https://www.gnu.org/licenses/gpl-2.0.html)
+
+**Backend:**
+[![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4?logo=php&logoColor=white)](https://www.php.net/)
+[![WordPress](https://img.shields.io/badge/WordPress-6.4%2B-21759B?logo=wordpress&logoColor=white)](https://wordpress.org/)
+[![PHPUnit](https://img.shields.io/badge/tests-PHPUnit%209-366488)](https://phpunit.de/)
+[![PHPStan](https://img.shields.io/badge/PHPStan-level%206-4F5B93)](https://phpstan.org/)
+[![WPCS](https://img.shields.io/badge/code%20style-WPCS-21759B?logo=wordpress&logoColor=white)](https://github.com/WordPress/WordPress-Coding-Standards)
+[![JWT](https://img.shields.io/badge/auth-JWT%20HS256-000000?logo=jsonwebtokens&logoColor=white)](docs/api.md#authentication-bp-trackerv1auth)
+
+**Frontend:**
+[![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vite.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+[![TanStack Query](https://img.shields.io/badge/TanStack%20Query-5-FF4154?logo=reactquery&logoColor=white)](https://tanstack.com/query)
+[![Recharts](https://img.shields.io/badge/charts-Recharts%203-22B5BF)](https://recharts.org/)
+[![Vitest](https://img.shields.io/badge/tests-Vitest%205-6E9F18?logo=vitest&logoColor=white)](https://vitest.dev/)
+[![ESLint](https://img.shields.io/badge/lint-ESLint-4B32C3?logo=eslint&logoColor=white)](https://eslint.org/)
+[![Prettier](https://img.shields.io/badge/code%20style-Prettier-F7B93E?logo=prettier&logoColor=black)](https://prettier.io/)
 
 Personal blood pressure tracker. Monorepo:
 
