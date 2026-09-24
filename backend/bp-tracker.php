@@ -132,6 +132,7 @@ function bp_tracker_check_requirements(): void {
 bp_tracker_load_env_file( __DIR__ );
 bp_tracker_define_from_env( 'BP_TRACKER_JWT_SECRET' );
 bp_tracker_define_from_env( 'BP_TRACKER_FRONTEND_ORIGIN' );
+bp_tracker_define_from_env( 'BP_TRACKER_TRUSTED_PROXIES' );
 
 register_activation_hook( __FILE__, 'bp_tracker_check_requirements' );
 

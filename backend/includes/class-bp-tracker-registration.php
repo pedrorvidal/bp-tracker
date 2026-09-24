@@ -35,30 +35,6 @@ class BP_Tracker_Registration {
 	const PASSWORD_MAX_LENGTH = 256;
 
 	/**
-	 * Registration attempts allowed per client IP within WINDOW.
-	 *
-	 * Counts every attempt, successful or not: it bounds both mass sign-ups
-	 * and probing which usernames/emails are taken.
-	 *
-	 * @var int
-	 */
-	const MAX_PER_IP = 10;
-
-	/**
-	 * Length of the rate limit window, in seconds.
-	 *
-	 * @var int
-	 */
-	const WINDOW = HOUR_IN_SECONDS;
-
-	/**
-	 * Transient prefix for the per-IP attempt counters.
-	 *
-	 * @var string
-	 */
-	const TRANSIENT_PREFIX = 'bp_tracker_register_';
-
-	/**
 	 * Wires up the route.
 	 */
 	public static function init(): void {
@@ -104,20 +80,19 @@ class BP_Tracker_Registration {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public static function handle_register( WP_REST_Request $request ): WP_REST_Response|WP_Error {
-		$retry_after = self::retry_after( BP_Tracker_Login_Throttle::client_ip() );
+		$ip          = BP_Tracker_Rate_Limiter::client_ip();
+		$retry_after = BP_Tracker_Rate_Limiter::register_retry_after( $ip );
 
 		if ( $retry_after > 0 ) {
-			return new WP_Error(
+			return BP_Tracker_Rate_Limiter::too_many_requests(
 				'bp_tracker_register_too_many_attempts',
 				__( 'Too many registration attempts. Try again later.', 'bp-tracker' ),
-				array(
-					'status'      => 429,
-					'retry_after' => $retry_after,
-				)
+				$retry_after
 			);
 		}
 
-		self::record_attempt( BP_Tracker_Login_Throttle::client_ip() );
+		// Every attempt counts, valid or not (see BP_Tracker_Rate_Limiter).
+		BP_Tracker_Rate_Limiter::record_register_attempt( $ip );
 
 		$username = (string) $request->get_param( 'username' );
 		$email    = trim( (string) $request->get_param( 'email' ) );
@@ -209,79 +184,6 @@ class BP_Tracker_Registration {
 	 */
 	private static function invalid( string $code, string $message ): WP_Error {
 		return new WP_Error( $code, $message, array( 'status' => 400 ) );
-	}
-
-	/**
-	 * Seconds until the IP may try to register again; 0 when it may now.
-	 *
-	 * @param string $ip Client IP ('' when unknown: not limited).
-	 * @return int
-	 */
-	private static function retry_after( string $ip ): int {
-		$state = self::read( $ip );
-
-		if ( null === $state || $state['count'] < self::MAX_PER_IP ) {
-			return 0;
-		}
-
-		return max( 0, $state['reset_at'] - time() );
-	}
-
-	/**
-	 * Counts a registration attempt from an IP.
-	 *
-	 * @param string $ip Client IP ('' when unknown: not counted).
-	 */
-	private static function record_attempt( string $ip ): void {
-		if ( '' === $ip ) {
-			return;
-		}
-
-		$now   = time();
-		$state = self::read( $ip );
-
-		if ( null === $state || $state['reset_at'] <= $now ) {
-			$state = array(
-				'count'    => 0,
-				'reset_at' => $now + self::WINDOW,
-			);
-		}
-
-		++$state['count'];
-		set_transient( self::transient_name( $ip ), $state, max( 1, $state['reset_at'] - $now ) );
-	}
-
-	/**
-	 * Reads an IP's attempt counter.
-	 *
-	 * @param string $ip Client IP.
-	 * @return array{count: int, reset_at: int}|null
-	 */
-	private static function read( string $ip ): ?array {
-		if ( '' === $ip ) {
-			return null;
-		}
-
-		$state = get_transient( self::transient_name( $ip ) );
-
-		if ( ! is_array( $state ) || ! isset( $state['count'], $state['reset_at'] ) ) {
-			return null;
-		}
-
-		return array(
-			'count'    => (int) $state['count'],
-			'reset_at' => (int) $state['reset_at'],
-		);
-	}
-
-	/**
-	 * Transient name for an IP's counter.
-	 *
-	 * @param string $ip Client IP.
-	 * @return string
-	 */
-	private static function transient_name( string $ip ): string {
-		return self::TRANSIENT_PREFIX . substr( hash( 'sha256', $ip ), 0, 32 );
 	}
 }
 

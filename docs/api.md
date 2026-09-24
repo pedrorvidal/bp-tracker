@@ -206,7 +206,7 @@ curl -s -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/register \
 | `400`  | `bp_tracker_register_long_password`     | The password is longer than 256 characters            |
 | `409`  | `bp_tracker_register_username_exists`   | The username is taken                                 |
 | `409`  | `bp_tracker_register_email_exists`      | The email is already registered                       |
-| `429`  | `bp_tracker_register_too_many_attempts` | More than 10 attempts from this IP in an hour         |
+| `429`  | `bp_tracker_register_too_many_attempts` | More than 3 attempts from this IP in an hour          |
 
 ```json
 {
@@ -216,7 +216,7 @@ curl -s -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/register \
 }
 ```
 
-**Rate limiting.** Every attempt counts, successful or not, so the limit bounds both mass sign-ups and probing which usernames or emails are taken. The window is a fixed hour per client IP (the same IP as login, including the `bp_tracker_client_ip` filter). The `429` body carries `data.retry_after` in seconds.
+**Rate limiting.** 3 attempts per client IP per fixed hour. Every attempt counts, successful or not, so the limit bounds both mass sign-ups and probing which usernames or emails are taken. The 4th attempt gets `429` with a `Retry-After` header, and the same number of seconds in `data.retry_after`. The client IP is resolved as for login (see _Client IP_ below).
 
 ### `POST /bp-tracker/v1/auth/login`
 
@@ -267,18 +267,21 @@ The pending status is only checked after the password, so it can't be used to fi
 }
 ```
 
-**Rate limiting.** Failed logins are counted in three buckets, each over a fixed 15-minute window:
+**Rate limiting** (`backend/includes/class-bp-tracker-rate-limiter.php`). Failed logins are counted in three buckets, each over a fixed 15-minute window, stored in transients:
 
-| Bucket           | Limit | Purpose                                                                         |
-| ---------------- | ----- | ------------------------------------------------------------------------------- |
-| account + IP     | 5     | Stops brute force without letting an attacker lock the real user out everywhere |
-| IP (any account) | 20    | Stops one address from trying many accounts                                     |
-| account (any IP) | 50    | Stops distributed attacks on one account                                        |
+| Bucket           | Limit | Purpose                                                                                                |
+| ---------------- | ----- | ------------------------------------------------------------------------------------------------------ |
+| IP (any account) | 5     | The main limit: 5 failures from one IP block the 6th attempt, for every account                        |
+| account + IP     | 5     | Keeps the limit per victim even if the attacker resets the IP bucket by logging into their own account |
+| account (any IP) | 50    | Stops distributed attacks on one account                                                               |
 
 - **While a bucket is full,** every attempt gets `429`, **even with the correct password**, because the lock is checked before the password.
+- **Other IPs are unaffected.** A lock applies to one IP. Only the account-wide limit (50) spans IPs.
+- **A successful login** resets the IP bucket and that account's buckets, so a user who mistyped a few times isn't penalized afterwards. A pending account's correct password resets nothing, so signing up can't be used to reset the counters.
 - **The account** is identified by login name or email, which count as one account. Unknown usernames are counted the same way, so the response doesn't reveal which accounts exist.
-- **A successful login** resets that account's buckets but not the IP bucket.
-- **The client IP** is `REMOTE_ADDR`. Behind a reverse proxy, set the real client IP with the `bp_tracker_client_ip` filter. Only do that when the header comes from your own proxy.
+- **Transient names** hold an HMAC of the IP or account (keyed with the site's `AUTH_SALT`), e.g. `bp_tracker_rl_login_<hash>`, never the value itself.
+
+**Client IP** (login and register). By default it is `REMOTE_ADDR`, and `X-Forwarded-For` is **ignored**: any client can send that header, so trusting it would let an attacker use a new IP for every attempt, or get someone else's IP locked. When WordPress runs behind a reverse proxy, load balancer or CDN, list the proxy addresses in `BP_TRACKER_TRUSTED_PROXIES` (IPs or CIDR ranges, see the README). For requests arriving from one of them, the client is the right-most `X-Forwarded-For` entry that isn't a trusted proxy. Entries further left were written by the client and are ignored. A CDN that sends the client in another header (e.g. `CF-Connecting-IP`) needs the `bp_tracker_client_ip` filter instead. **Revisit this whenever the hosting changes:** with the wrong setting, every user shares the proxy's IP and one user's typos lock everybody out.
 
 The response includes a `Retry-After` header. The same value is also in the body, because browsers don't expose `Retry-After` to cross-origin JavaScript:
 

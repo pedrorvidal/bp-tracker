@@ -219,20 +219,24 @@ class BP_Tracker_JWT_Auth {
 	public static function handle_login( WP_REST_Request $request ): WP_REST_Response|WP_Error {
 		$username = (string) $request->get_param( 'username' );
 		$password = (string) $request->get_param( 'password' );
-		$ip       = BP_Tracker_Login_Throttle::client_ip();
+		$ip       = BP_Tracker_Rate_Limiter::client_ip();
 
 		// Checked before the password, so a correct guess can't be confirmed
 		// while locked out.
-		$retry_after = BP_Tracker_Login_Throttle::retry_after( $username, $ip );
+		$retry_after = BP_Tracker_Rate_Limiter::login_retry_after( $username, $ip );
 
 		if ( $retry_after > 0 ) {
-			return self::too_many_attempts_response( $retry_after );
+			return BP_Tracker_Rate_Limiter::too_many_requests(
+				'bp_tracker_jwt_too_many_attempts',
+				__( 'Too many failed login attempts. Try again later.', 'bp-tracker' ),
+				$retry_after
+			);
 		}
 
 		$user = wp_authenticate( $username, $password );
 
 		if ( is_wp_error( $user ) ) {
-			BP_Tracker_Login_Throttle::record_failure( $username, $ip );
+			BP_Tracker_Rate_Limiter::record_login_failure( $username, $ip );
 
 			return new WP_Error(
 				'bp_tracker_jwt_invalid_credentials',
@@ -241,10 +245,9 @@ class BP_Tracker_JWT_Auth {
 			);
 		}
 
-		BP_Tracker_Login_Throttle::clear_account( $username, $ip );
-
 		// Checked only after the password, so it can't be used to find out
-		// which accounts are pending.
+		// which accounts are pending. The counters are not cleared for a
+		// pending account: signing up must not be a way to reset them.
 		if ( BP_Tracker_Roles::is_pending( $user ) ) {
 			return new WP_Error(
 				'bp_tracker_jwt_account_pending',
@@ -252,6 +255,8 @@ class BP_Tracker_JWT_Auth {
 				array( 'status' => 403 )
 			);
 		}
+
+		BP_Tracker_Rate_Limiter::clear_login( $username, $ip );
 
 		try {
 			return self::token_response( $user );
@@ -446,32 +451,6 @@ class BP_Tracker_JWT_Auth {
 			200
 		);
 		$response->header( 'Set-Cookie', self::build_refresh_cookie( '', 0 ) );
-
-		return $response;
-	}
-
-	/**
-	 * Builds the 429 returned while a login is rate limited.
-	 *
-	 * The wait is also in the body: browsers don't expose Retry-After to
-	 * cross-origin JavaScript unless it is CORS-exposed.
-	 *
-	 * @param int $retry_after Seconds until the next attempt is allowed.
-	 * @return WP_REST_Response
-	 */
-	private static function too_many_attempts_response( int $retry_after ): WP_REST_Response {
-		$response = new WP_REST_Response(
-			array(
-				'code'    => 'bp_tracker_jwt_too_many_attempts',
-				'message' => __( 'Too many failed login attempts. Try again later.', 'bp-tracker' ),
-				'data'    => array(
-					'status'      => 429,
-					'retry_after' => $retry_after,
-				),
-			),
-			429
-		);
-		$response->header( 'Retry-After', (string) $retry_after );
 
 		return $response;
 	}

@@ -246,18 +246,32 @@ class BP_Tracker_Registration_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Registration attempts are limited per IP, successful or not.
+	 * Registration allows 3 attempts per IP per hour, successful or not; the
+	 * 4th gets 429 with Retry-After.
 	 */
 	public function test_registration_is_rate_limited_per_ip(): void {
 		$_SERVER['REMOTE_ADDR'] = '203.0.113.7';
 
-		for ( $i = 0; $i < BP_Tracker_Registration::MAX_PER_IP; $i++ ) {
-			$this->assertNotSame( 429, $this->register( array( 'password' => 'short' ) )->get_status() );
-		}
+		$this->assertSame( 3, BP_Tracker_Rate_Limiter::REGISTER_MAX_PER_IP );
+		$this->assertSame( HOUR_IN_SECONDS, BP_Tracker_Rate_Limiter::REGISTER_WINDOW );
+		$this->assertSame(
+			201,
+			$this->register(
+				array(
+					'username' => 'first-person',
+					'email'    => 'first@example.com',
+				)
+			)->get_status()
+		);
+		$this->assertSame( 400, $this->register( array( 'password' => 'short' ) )->get_status() );
+		$this->assertSame( 400, $this->register( array( 'password' => 'short' ) )->get_status() );
 
 		$blocked = $this->register();
 		$this->assertError( 429, 'bp_tracker_register_too_many_attempts', $blocked );
-		$this->assertGreaterThan( 0, $blocked->get_data()['data']['retry_after'] );
+		$retry_after = $blocked->get_data()['data']['retry_after'];
+		$this->assertGreaterThan( 0, $retry_after );
+		$this->assertLessThanOrEqual( HOUR_IN_SECONDS, $retry_after );
+		$this->assertSame( (string) $retry_after, $blocked->get_headers()['Retry-After'] );
 		$this->assertFalse( get_user_by( 'login', 'new-person' ) );
 
 		// Another IP is not affected.

@@ -82,12 +82,13 @@ Every check in a workflow runs even when an earlier one fails, so a single run r
 
 ## Configuration
 
-The plugin needs two settings. They are **not** stored in the database, and neither is committed to the repository.
+The plugin has three settings. They are **not** stored in the database, and neither is committed to the repository.
 
-| Setting                      | Required               | Purpose                                              |
-| ---------------------------- | ---------------------- | ---------------------------------------------------- |
-| `BP_TRACKER_JWT_SECRET`      | Yes, at least 32 bytes | HMAC-SHA256 key that signs access tokens             |
-| `BP_TRACKER_FRONTEND_ORIGIN` | No                     | The only origin allowed to call the API cross-origin |
+| Setting                      | Required               | Purpose                                                      |
+| ---------------------------- | ---------------------- | ------------------------------------------------------------ |
+| `BP_TRACKER_JWT_SECRET`      | Yes, at least 32 bytes | HMAC-SHA256 key that signs access tokens                     |
+| `BP_TRACKER_FRONTEND_ORIGIN` | No                     | The only origin allowed to call the API cross-origin         |
+| `BP_TRACKER_TRUSTED_PROXIES` | No                     | Proxies whose `X-Forwarded-For` is trusted for rate limiting |
 
 ### Local development: `backend/.env`
 
@@ -118,7 +119,15 @@ Define the constants in `wp-config.php`, above the `/* That's all, stop editing!
 ```php
 define( 'BP_TRACKER_JWT_SECRET', 'output of: openssl rand -base64 48' );
 define( 'BP_TRACKER_FRONTEND_ORIGIN', 'https://app.example.com' );
+// Only when behind a reverse proxy / load balancer / CDN (see below).
+define( 'BP_TRACKER_TRUSTED_PROXIES', '10.0.0.0/8' );
 ```
+
+### `BP_TRACKER_TRUSTED_PROXIES` and the client IP
+
+Login and sign-up are rate limited per client IP. By default the client IP is `REMOTE_ADDR` and `X-Forwarded-For` is ignored, because any client can forge that header. That is right for local dev and for a server that faces clients directly.
+
+**Behind a reverse proxy, load balancer or CDN**, `REMOTE_ADDR` is the proxy, so every user would share one IP and a few typos would lock everybody out. Set `BP_TRACKER_TRUSTED_PROXIES` to the proxy addresses, as comma-separated IPs or CIDR ranges (e.g. `10.0.0.0/8,2001:db8::/32`). The client IP is then read from `X-Forwarded-For`, but only for requests arriving from those addresses. If the CDN sends the client in another header, such as Cloudflare's `CF-Connecting-IP`, use the `bp_tracker_client_ip` filter instead. Review this setting whenever the hosting changes. See [`docs/api.md`](docs/api.md) for the exact rules.
 
 ### Safeguards
 
@@ -147,7 +156,7 @@ In short:
 - the refresh token lives only in an `HttpOnly; SameSite=Strict` cookie scoped to `/auth/*`, which JavaScript can't read;
 - the access token lives in memory and expires after 15 minutes;
 - the `/auth/*` routes require an `X-BP-Tracker-CSRF: 1` header;
-- failed logins are rate limited, per account + IP, per IP and per account, and the response is `429` with a wait time;
+- failed logins are rate limited (5 per IP per 15 minutes, plus per-account limits), sign-ups too (3 per IP per hour); the response is `429` with a `Retry-After` header;
 - changing the password, or "sign out of all devices" (`POST /auth/logout-all`), revokes every session of the user immediately;
 - reusing a refresh token that was already used (a sign of theft) revokes that whole session, including the thief's copy;
 - expired refresh tokens are purged daily by WP-Cron.
