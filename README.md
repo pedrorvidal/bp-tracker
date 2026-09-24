@@ -27,7 +27,7 @@ cp backend/.env.example backend/.env
 npx wp-env start
 ```
 
-This starts a dev site at `http://localhost:8888` and a test site at `http://localhost:8889`, both with the plugin active. Log in to the dev site with `admin` / `password`. Before the first start, create `backend/.env` (see [Configuration](#configuration)); without it, plugin activation fails.
+This starts a dev site at `http://localhost:8888` and a test site at `http://localhost:8889`, both with the plugin active. Log in to the dev site with `admin` / `password`. PHP errors are never shown on the page; they go to `/tmp/wp-errors.log` in the container (`npx wp-env run wordpress tail -f /tmp/wp-errors.log`). See [Error reporting and debug settings](docs/architecture.md#error-reporting-and-debug-settings). Before the first start, create `backend/.env` (see [Configuration](#configuration)); without it, plugin activation fails.
 
 ### Frontend
 
