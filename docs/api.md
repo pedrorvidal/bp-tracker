@@ -117,7 +117,7 @@ All datetimes are ISO 8601 / RFC 3339 strings with a timezone offset, for exampl
 
 Authentication is built into the plugin (`backend/includes/class-bp-tracker-jwt-auth.php`) and needs no third-party plugin.
 
-- **Access token:** an HS256-signed JWT returned in the JSON body. It expires after 15 minutes (`expires_in: 900`); the short lifetime bounds how long a leaked token stays usable, and refreshing is transparent to users. Send it as `Authorization: Bearer <access_token>` to the readings and stats routes. Browsers should keep it in memory only.
+- **Access token:** an HS256-signed JWT returned in the JSON body. The algorithm is fixed on the server: a token whose header asks for any other `alg` (including `none`, another HMAC size or an asymmetric one) is rejected with `401 bp_tracker_jwt_invalid_token`. It expires after 15 minutes (`expires_in: 900`); the short lifetime bounds how long a leaked token stays usable, and refreshing is transparent to users. Send it as `Authorization: Bearer <access_token>` to the readings and stats routes. Browsers should keep it in memory only.
 - **Refresh token:** 32 random bytes, hex-encoded, valid for 30 days. It is **never in a response body**. The server sets it in a cookie that JavaScript can't read:
 
   ```

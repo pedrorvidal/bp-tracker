@@ -719,6 +719,9 @@ class BP_Tracker_JWT_Auth {
 		}
 
 		try {
+			// The algorithm is fixed here, never taken from the token: php-jwt
+			// rejects any token whose header "alg" isn't this key's (HS256),
+			// including "none" (algorithm confusion).
 			$decoded = JWT::decode( $token, new Key( self::get_secret(), 'HS256' ) );
 		} catch ( Throwable $e ) {
 			self::$auth_error = self::invalid_token_error();
