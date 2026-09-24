@@ -206,3 +206,5 @@ The frontend restores the session on page load from that cookie, refreshes autom
 ## Development process
 
 This project is built with the help of [Claude Code](https://claude.com/claude-code), used for implementation, tests and documentation under the maintainer's review.
+
+The [implementation manual](bp-tracker-implementation-manual.pdf) records the requirements, architecture decisions, security model and the phase-by-phase specifications used to build it.
