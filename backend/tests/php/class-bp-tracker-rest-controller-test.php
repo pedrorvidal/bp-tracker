@@ -25,7 +25,7 @@ class BP_Tracker_REST_Controller_Test extends WP_UnitTestCase {
 	public function setUp(): void {
 		parent::setUp();
 
-		$this->user_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		$this->user_id = self::factory()->user->create( array( 'role' => BP_Tracker_Roles::USER ) );
 	}
 
 	/**
@@ -156,7 +156,7 @@ class BP_Tracker_REST_Controller_Test extends WP_UnitTestCase {
 	 * A user cannot read, edit or delete another user's reading.
 	 */
 	public function test_user_cannot_access_another_users_reading(): void {
-		$other_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		$other_id = self::factory()->user->create( array( 'role' => BP_Tracker_Roles::USER ) );
 		$id       = $this->create_reading_for( $this->user_id );
 
 		wp_set_current_user( $other_id );
@@ -174,7 +174,7 @@ class BP_Tracker_REST_Controller_Test extends WP_UnitTestCase {
 	 * The collection only ever returns the current user's own readings.
 	 */
 	public function test_collection_only_returns_current_users_readings(): void {
-		$other_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		$other_id = self::factory()->user->create( array( 'role' => BP_Tracker_Roles::USER ) );
 
 		$own_id        = $this->create_reading_for( $this->user_id );
 		$other_id_post = $this->create_reading_for( $other_id );
@@ -292,7 +292,7 @@ class BP_Tracker_REST_Controller_Test extends WP_UnitTestCase {
 			)
 		);
 		// Belongs to another user -- must never be counted.
-		$other_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		$other_id = self::factory()->user->create( array( 'role' => BP_Tracker_Roles::USER ) );
 		$this->create_reading_for(
 			$other_id,
 			array(
@@ -384,5 +384,94 @@ class BP_Tracker_REST_Controller_Test extends WP_UnitTestCase {
 		$this->assertSame( 110, $data['systolic_min'] );
 		$this->assertSame( 150, $data['systolic_max'] );
 		$this->assertNull( $data['pulse_min'] );
+	}
+
+	/**
+	 * Logged-in users whose role lacks the reading capabilities (a pending
+	 * account with a WordPress cookie session, a subscriber, an author)
+	 * are refused on every route, not just at JWT login.
+	 *
+	 * @dataProvider data_roles_without_access
+	 *
+	 * @param string $role Role of the logged-in user.
+	 */
+	public function test_roles_without_reading_caps_are_forbidden( string $role ): void {
+		$id = $this->create_reading_for( $this->user_id );
+		wp_set_current_user( self::factory()->user->create( array( 'role' => $role ) ) );
+
+		$this->assertSame( 403, $this->dispatch( 'GET', '/bp-tracker/v1/readings' )->get_status() );
+		$this->assertSame( 403, $this->dispatch( 'GET', '/bp-tracker/v1/stats' )->get_status() );
+		$this->assertSame( 403, $this->dispatch( 'GET', '/bp-tracker/v1/readings/' . $id )->get_status() );
+		$this->assertSame( 403, $this->dispatch( 'PUT', '/bp-tracker/v1/readings/' . $id, array( 'systolic' => 100 ) )->get_status() );
+		$this->assertSame( 403, $this->dispatch( 'DELETE', '/bp-tracker/v1/readings/' . $id )->get_status() );
+
+		$create = $this->dispatch(
+			'POST',
+			'/bp-tracker/v1/readings',
+			array(
+				'reading_datetime' => '2026-09-22T08:00:00+00:00',
+				'systolic'         => 120,
+				'diastolic'        => 80,
+			)
+		);
+		$this->assertSame( 403, $create->get_status() );
+		$this->assertSame( 'bp_tracker_rest_forbidden', $create->as_error()->get_error_code() );
+
+		$this->assertSame( 120, (int) get_post_meta( $id, 'systolic', true ) );
+		$this->assertSame( 'publish', get_post_status( $id ) );
+	}
+
+	/**
+	 * Roles that must not reach the readings API.
+	 *
+	 * @return array<string, array{string}>
+	 */
+	public static function data_roles_without_access(): array {
+		return array(
+			'pending'    => array( BP_Tracker_Roles::PENDING ),
+			'subscriber' => array( 'subscriber' ),
+			'author'     => array( 'author' ),
+		);
+	}
+
+	/**
+	 * A bp_tracker_user manages their own readings end to end.
+	 */
+	public function test_bp_tracker_user_can_create_edit_and_delete_own_reading(): void {
+		wp_set_current_user( $this->user_id );
+
+		$created = $this->dispatch(
+			'POST',
+			'/bp-tracker/v1/readings',
+			array(
+				'reading_datetime' => '2026-09-22T08:00:00+00:00',
+				'systolic'         => 120,
+				'diastolic'        => 80,
+			)
+		);
+		$this->assertSame( 201, $created->get_status() );
+		$id = $created->get_data()['id'];
+
+		$this->assertSame( 200, $this->dispatch( 'PUT', '/bp-tracker/v1/readings/' . $id, array( 'systolic' => 118 ) )->get_status() );
+		$this->assertSame( 118, (int) get_post_meta( $id, 'systolic', true ) );
+		$this->assertSame( 200, $this->dispatch( 'DELETE', '/bp-tracker/v1/readings/' . $id )->get_status() );
+		$this->assertNull( get_post( $id ) );
+	}
+
+	/**
+	 * Administrators get the reading capabilities too, but still only see
+	 * and touch their own readings through the API.
+	 */
+	public function test_administrator_is_limited_to_own_readings(): void {
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		$others   = $this->create_reading_for( $this->user_id );
+		$own      = $this->create_reading_for( $admin_id );
+
+		wp_set_current_user( $admin_id );
+
+		$ids = wp_list_pluck( $this->dispatch( 'GET', '/bp-tracker/v1/readings' )->get_data(), 'id' );
+		$this->assertSame( array( $own ), $ids );
+		$this->assertSame( 403, $this->dispatch( 'GET', '/bp-tracker/v1/readings/' . $others )->get_status() );
+		$this->assertSame( 403, $this->dispatch( 'DELETE', '/bp-tracker/v1/readings/' . $others )->get_status() );
 	}
 }

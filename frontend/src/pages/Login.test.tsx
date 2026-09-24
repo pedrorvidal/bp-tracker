@@ -113,6 +113,26 @@ describe('Login page', () => {
     expect(getSession()).toBeNull()
   })
 
+  it('tells a pending account it is awaiting approval, not that the password is wrong', async () => {
+    mockApi({
+      'POST /auth/login': restError(
+        'bp_tracker_jwt_account_pending',
+        'Your account is pending approval.',
+        403,
+      ),
+    })
+    renderLogin()
+
+    await submit('new-person', 'correct password')
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(
+      'Your account is pending approval. You can sign in once an administrator approves it.',
+    )
+    expect(alert).not.toHaveTextContent('Invalid username or password.')
+    expect(getSession()).toBeNull()
+  })
+
   it.each<[string, MockReply]>([
     ['a network error', 'network-error'],
     ['a server error', restError('internal', 'Boom.', 500)],

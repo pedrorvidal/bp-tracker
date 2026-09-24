@@ -31,5 +31,20 @@
 		</properties>
 	</rule>
 
+	<!-- Capabilities of the bp_reading post type, granted by BP_Tracker_Roles. -->
+	<rule ref="WordPress.WP.Capabilities">
+		<properties>
+			<property name="custom_capabilities" type="array">
+				<element value="edit_bp_readings"/>
+				<element value="edit_published_bp_readings"/>
+				<element value="edit_others_bp_readings"/>
+				<element value="publish_bp_readings"/>
+				<element value="delete_bp_readings"/>
+				<element value="delete_published_bp_readings"/>
+				<element value="delete_others_bp_readings"/>
+			</property>
+		</properties>
+	</rule>
+
 	<config name="testVersion" value="8.2-"/>
 </ruleset>

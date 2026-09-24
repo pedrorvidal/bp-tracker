@@ -83,6 +83,9 @@ class BP_Tracker_CPT {
 	 * (show_in_rest is false): all access goes through the plugin's own
 	 * BP_Tracker_REST_Controller (bp-tracker/v1/readings), which enforces
 	 * ownership on every route.
+	 *
+	 * Uses its own capabilities (edit_bp_readings, ...), granted only by
+	 * BP_Tracker_Roles, instead of the generic post ones every author has.
 	 */
 	public static function register_post_type(): void {
 		register_post_type(
@@ -97,7 +100,7 @@ class BP_Tracker_CPT {
 				'show_in_menu'        => true,
 				'show_in_rest'        => false,
 				'supports'            => array( 'title', 'custom-fields' ),
-				'capability_type'     => 'post',
+				'capability_type'     => array( 'bp_reading', 'bp_readings' ),
 				'map_meta_cap'        => true,
 				'hierarchical'        => false,
 				'has_archive'         => false,

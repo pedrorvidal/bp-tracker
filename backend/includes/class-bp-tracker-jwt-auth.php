@@ -243,6 +243,16 @@ class BP_Tracker_JWT_Auth {
 
 		BP_Tracker_Login_Throttle::clear_account( $username, $ip );
 
+		// Checked only after the password, so it can't be used to find out
+		// which accounts are pending.
+		if ( BP_Tracker_Roles::is_pending( $user ) ) {
+			return new WP_Error(
+				'bp_tracker_jwt_account_pending',
+				__( 'Your account is pending approval.', 'bp-tracker' ),
+				array( 'status' => 403 )
+			);
+		}
+
 		try {
 			return self::token_response( $user );
 		} catch ( RuntimeException $e ) {
@@ -269,6 +279,13 @@ class BP_Tracker_JWT_Auth {
 		$user = get_userdata( (int) $row->user_id );
 
 		if ( false === $user ) {
+			return self::invalid_refresh_response();
+		}
+
+		// A user made pending again loses every session (see
+		// BP_Tracker_Roles::revoke_if_pending()); this is the backstop.
+		if ( BP_Tracker_Roles::is_pending( $user ) ) {
+			BP_Tracker_Sessions::revoke_all( $user->ID );
 			return self::invalid_refresh_response();
 		}
 

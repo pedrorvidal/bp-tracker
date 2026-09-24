@@ -6,16 +6,33 @@ Base URL in local dev: `http://localhost:8888/wp-json`.
 
 | Method   | Path                             | Auth required                | Description                     |
 | -------- | -------------------------------- | ---------------------------- | ------------------------------- |
+| `POST`   | `/bp-tracker/v1/auth/register`   | CSRF header                  | Sign up (pending approval)      |
 | `POST`   | `/bp-tracker/v1/auth/login`      | CSRF header                  | Exchange credentials for tokens |
 | `POST`   | `/bp-tracker/v1/auth/refresh`    | Refresh cookie + CSRF header | Rotate the refresh token        |
 | `POST`   | `/bp-tracker/v1/auth/logout`     | Refresh cookie + CSRF header | Revoke the refresh token        |
 | `POST`   | `/bp-tracker/v1/auth/logout-all` | Refresh cookie + CSRF header | Sign out of every device        |
-| `GET`    | `/bp-tracker/v1/readings`        | Yes                          | List the caller's readings      |
-| `POST`   | `/bp-tracker/v1/readings`        | Yes                          | Create a reading                |
-| `GET`    | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Get one reading                 |
-| `PUT`    | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Partially update a reading      |
-| `DELETE` | `/bp-tracker/v1/readings/{id}`   | Yes (owner)                  | Delete a reading                |
-| `GET`    | `/bp-tracker/v1/stats`           | Yes                          | Averages, min/max and count     |
+| `GET`    | `/bp-tracker/v1/readings`        | Approved user                | List the caller's readings      |
+| `POST`   | `/bp-tracker/v1/readings`        | Approved user                | Create a reading                |
+| `GET`    | `/bp-tracker/v1/readings/{id}`   | Approved user (owner)        | Get one reading                 |
+| `PUT`    | `/bp-tracker/v1/readings/{id}`   | Approved user (owner)        | Partially update a reading      |
+| `DELETE` | `/bp-tracker/v1/readings/{id}`   | Approved user (owner)        | Delete a reading                |
+| `GET`    | `/bp-tracker/v1/stats`           | Approved user                | Averages, min/max and count     |
+
+## Roles and approval
+
+Accounts go through an approval step. The plugin adds two roles (`backend/includes/class-bp-tracker-roles.php`):
+
+| Role                 | Capabilities                                                                                                                          | Can do                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `bp_tracker_pending` | none (not even `read`)                                                                                                                | Nothing. Login is refused with `403 bp_tracker_jwt_account_pending` |
+| `bp_tracker_user`    | `read`, `edit_bp_readings`, `edit_published_bp_readings`, `publish_bp_readings`, `delete_bp_readings`, `delete_published_bp_readings` | Create, edit and delete **their own** readings                      |
+
+- **Sign-up** (`POST /auth/register`) creates a `bp_tracker_pending` user. An administrator approves it by changing the role to `bp_tracker_user` (Users screen, or `wp user set-role <user> bp_tracker_user`). The action `bp_tracker_user_registered( $user_id )` fires on every sign-up, so a notification can be hooked in.
+- **Nobody gets `edit_others_bp_readings` or `delete_others_bp_readings`.** On top of that, every `/readings/{id}` route checks ownership explicitly, so even an administrator only reaches their own readings through the API.
+- **The `bp_reading` post type has its own capabilities** (`capability_type` `bp_reading`/`bp_readings`, with `map_meta_cap`). Generic roles such as `author` or `subscriber` have none of them, and get `403` on every readings route.
+- **Administrators** get the five reading capabilities above (not the `*_others_*` ones).
+- **Demotion ends sessions.** Giving a user the pending role again revokes all of their sessions (same as _Session revocation_ below), and `refresh` refuses pending users as a backstop.
+- **Installation:** the roles are created on activation and, for sites where the plugin is already active, on the first request after an update (`bp_tracker_roles_version` option). Deactivation removes both roles and the administrators' capabilities. Users keep the role name, so reactivating restores their access.
 
 ## Conventions
 
@@ -122,6 +139,7 @@ Authentication is built into the plugin (`backend/includes/class-bp-tracker-jwt-
 - **CSRF protection:** the browser sends the cookie automatically, so every `/auth/*` route requires the header `X-BP-Tracker-CSRF: 1`. A custom header forces a CORS preflight, which only `BP_TRACKER_FRONTEND_ORIGIN` passes. Without the header, the response is `403 bp_tracker_jwt_missing_csrf_header`.
 - **Session revocation:** each access token carries the user's _session generation_ (`gen` claim). Revoking all of a user's sessions increments it, so every access token issued before is rejected immediately (`401 bp_tracker_jwt_invalid_token`), and all their refresh tokens are deleted. This happens:
   - when the password changes (reset, profile screen, WP-CLI, `wp_set_password()`);
+  - when the user is given the `bp_tracker_pending` role;
   - on `POST /auth/logout-all` ("sign out of all devices").
 
   Deleting a user deletes their refresh tokens too. A daily WP-Cron job (`bp_tracker_purge_expired_refresh_tokens`) deletes expired refresh tokens; it is removed when the plugin is deactivated.
@@ -149,6 +167,56 @@ Errors shared by the auth routes:
 
 The curl examples below keep the cookie in a jar file (`-c` writes it, `-b` sends it), the same way a browser does.
 
+### `POST /bp-tracker/v1/auth/register`
+
+Public sign-up. Creates a user with the `bp_tracker_pending` role and issues **no token and no cookie**: the account can't log in until an administrator approves it (see _Roles and approval_).
+
+**Headers:** `Content-Type: application/json`, `X-BP-Tracker-CSRF: 1`
+
+**Body:**
+
+| Field      | Type   | Required | Rules                                                                                                                 |
+| ---------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------- |
+| `username` | string | Yes      | Up to 60 characters: letters, numbers, spaces, `.` `_` `-` `@`. Rejected (not rewritten) otherwise. Must not be taken |
+| `email`    | string | Yes      | A valid email address, not already registered                                                                         |
+| `password` | string | Yes      | 8 to 256 characters                                                                                                   |
+
+```bash
+curl -s -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -H "X-BP-Tracker-CSRF: 1" \
+  -d '{"username":"jane","email":"jane@example.com","password":"a long passphrase"}'
+```
+
+**Success: `201 Created`.**
+
+```json
+{ "message": "Registration received. Your account is pending approval." }
+```
+
+**Errors:**
+
+| Status | `code`                                  | Cause                                                 |
+| ------ | --------------------------------------- | ----------------------------------------------------- |
+| `400`  | `rest_missing_callback_param`           | A field is missing                                    |
+| `400`  | `bp_tracker_register_invalid_username`  | The username has disallowed characters or is too long |
+| `400`  | `bp_tracker_register_invalid_email`     | The email is not valid                                |
+| `400`  | `bp_tracker_register_weak_password`     | The password is shorter than 8 characters             |
+| `400`  | `bp_tracker_register_long_password`     | The password is longer than 256 characters            |
+| `409`  | `bp_tracker_register_username_exists`   | The username is taken                                 |
+| `409`  | `bp_tracker_register_email_exists`      | The email is already registered                       |
+| `429`  | `bp_tracker_register_too_many_attempts` | More than 10 attempts from this IP in an hour         |
+
+```json
+{
+  "code": "bp_tracker_register_username_exists",
+  "message": "That username is already taken.",
+  "data": { "status": 409 }
+}
+```
+
+**Rate limiting.** Every attempt counts, successful or not, so the limit bounds both mass sign-ups and probing which usernames or emails are taken. The window is a fixed hour per client IP (the same IP as login, including the `bp_tracker_client_ip` filter). The `429` body carries `data.retry_after` in seconds.
+
 ### `POST /bp-tracker/v1/auth/login`
 
 Checks the credentials with `wp_authenticate()`. Returns the access token and user, and sets the refresh cookie.
@@ -173,16 +241,27 @@ curl -s -c cookies.txt -X POST http://localhost:8888/wp-json/bp-tracker/v1/auth/
 
 **Errors:**
 
-| Status | `code`                               | Cause                            |
-| ------ | ------------------------------------ | -------------------------------- |
-| `400`  | `rest_missing_callback_param`        | `username` or `password` missing |
-| `403`  | `bp_tracker_jwt_invalid_credentials` | Wrong username or password       |
-| `429`  | `bp_tracker_jwt_too_many_attempts`   | Too many failed attempts (below) |
+| Status | `code`                               | Cause                                                       |
+| ------ | ------------------------------------ | ----------------------------------------------------------- |
+| `400`  | `rest_missing_callback_param`        | `username` or `password` missing                            |
+| `403`  | `bp_tracker_jwt_invalid_credentials` | Wrong username or password                                  |
+| `403`  | `bp_tracker_jwt_account_pending`     | Correct password, but the account is still pending approval |
+| `429`  | `bp_tracker_jwt_too_many_attempts`   | Too many failed attempts (below)                            |
 
 ```json
 {
   "code": "bp_tracker_jwt_invalid_credentials",
   "message": "Invalid username or password.",
+  "data": { "status": 403 }
+}
+```
+
+The pending status is only checked after the password, so it can't be used to find out which accounts are pending:
+
+```json
+{
+  "code": "bp_tracker_jwt_account_pending",
+  "message": "Your account is pending approval.",
   "data": { "status": 403 }
 }
 ```
@@ -317,17 +396,26 @@ Every route that returns readings uses this shape. The raw post object is never 
 
 ### Errors shared by the readings routes
 
-| Status | `code`                      | Cause                                                              |
-| ------ | --------------------------- | ------------------------------------------------------------------ |
-| `401`  | `bp_tracker_rest_forbidden` | No authenticated user                                              |
-| `403`  | `bp_tracker_rest_forbidden` | The reading belongs to another user (`/readings/{id}` routes only) |
-| `404`  | `bp_tracker_rest_not_found` | The reading doesn't exist (`/readings/{id}` routes only)           |
+| Status | `code`                      | Cause                                                                         |
+| ------ | --------------------------- | ----------------------------------------------------------------------------- |
+| `401`  | `bp_tracker_rest_forbidden` | No authenticated user                                                         |
+| `403`  | `bp_tracker_rest_forbidden` | The user's role lacks the reading capabilities (pending, subscriber, author…) |
+| `403`  | `bp_tracker_rest_forbidden` | The reading belongs to another user (`/readings/{id}` routes only)            |
+| `404`  | `bp_tracker_rest_not_found` | The reading doesn't exist (`/readings/{id}` routes only)                      |
 
 ```json
 {
   "code": "bp_tracker_rest_forbidden",
   "message": "You must be logged in to view readings.",
   "data": { "status": 401 }
+}
+```
+
+```json
+{
+  "code": "bp_tracker_rest_forbidden",
+  "message": "Your account is not allowed to manage readings.",
+  "data": { "status": 403 }
 }
 ```
 

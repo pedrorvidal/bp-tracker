@@ -24,6 +24,12 @@ function getRedirectTarget(state: unknown): string {
 }
 
 function getErrorMessage(error: unknown): string {
+  if (
+    isApiError(error) &&
+    error.response?.data.code === 'bp_tracker_jwt_account_pending'
+  ) {
+    return 'Your account is pending approval. You can sign in once an administrator approves it.'
+  }
   if (isApiError(error) && error.response?.status === 403) {
     return 'Invalid username or password.'
   }

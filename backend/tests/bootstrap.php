@@ -34,6 +34,9 @@ function bp_tracker_tests_load_plugin(): void {
 
 	BP_Tracker_JWT_Auth::create_tables();
 
+	// Activation hooks don't run here: install the roles the same way.
+	BP_Tracker_Roles::install();
+
 	// WordPress' test installer doesn't reset plugin tables, so rows left by
 	// an interrupted run (or anything that escaped a test's rollback) would
 	// leak into this one. Start every run from an empty table.

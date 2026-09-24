@@ -140,7 +140,7 @@ The test site needs no `.env`: `backend/tests/bootstrap.php` defines test values
 
 ## Authentication
 
-See [`docs/api.md`](docs/api.md) for the full request/response reference and `curl` examples for `login`, `refresh`, `logout` and `logout-all`.
+See [`docs/api.md`](docs/api.md) for the full request/response reference and `curl` examples for `register`, `login`, `refresh`, `logout` and `logout-all`.
 
 In short:
 
@@ -151,5 +151,15 @@ In short:
 - changing the password, or "sign out of all devices" (`POST /auth/logout-all`), revokes every session of the user immediately;
 - reusing a refresh token that was already used (a sign of theft) revokes that whole session, including the thief's copy;
 - expired refresh tokens are purged daily by WP-Cron.
+
+### Accounts and approval
+
+- `POST /auth/register` creates an account with the `bp_tracker_pending` role. It has no capabilities and can't log in (`403`, "Your account is pending approval.").
+- An administrator approves it by changing the role to `bp_tracker_user`, on the Users screen or with `npx wp-env run cli wp user set-role <user> bp_tracker_user`.
+- `bp_tracker_user` can create, edit and delete **only their own** readings. No role has `edit_others_bp_readings` or `delete_others_bp_readings`.
+- Readings use their own capabilities (`edit_bp_readings`, …), so generic roles such as `author` or `subscriber` get `403` on every readings route. Existing users need the `bp_tracker_user` role.
+- Making a user pending again revokes all of their sessions.
+
+Details are in [`docs/api.md`](docs/api.md#roles-and-approval).
 
 The frontend restores the session on page load from that cookie, refreshes automatically on a `401`, and sends signed-out users to `/login`. See [`frontend/README.md`](frontend/README.md#authentication) for the details, including the requirement that the frontend and the API share a site.

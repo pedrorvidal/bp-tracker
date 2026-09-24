@@ -329,23 +329,29 @@ class BP_Tracker_REST_Controller extends WP_REST_Controller {
 	}
 
 	/**
-	 * Requires an authenticated user.
+	 * Requires an authenticated user allowed to use readings.
 	 *
 	 * @param WP_REST_Request $request Current request.
 	 * @return true|WP_Error
 	 */
 	public function get_items_permissions_check( $request ): bool|WP_Error {
-		return is_user_logged_in() ? true : self::login_required_error();
+		return self::check_access();
 	}
 
 	/**
-	 * Requires an authenticated user.
+	 * Requires an authenticated user allowed to publish readings.
 	 *
 	 * @param WP_REST_Request $request Current request.
 	 * @return true|WP_Error
 	 */
 	public function create_item_permissions_check( $request ): bool|WP_Error {
-		return is_user_logged_in() ? true : self::login_required_error();
+		$access = self::check_access();
+
+		if ( true !== $access ) {
+			return $access;
+		}
+
+		return current_user_can( 'publish_bp_readings' ) ? true : self::forbidden_error();
 	}
 
 	/**
@@ -355,7 +361,7 @@ class BP_Tracker_REST_Controller extends WP_REST_Controller {
 	 * @return true|WP_Error
 	 */
 	public function get_item_permissions_check( $request ): bool|WP_Error {
-		return self::check_owner( (int) $request->get_param( 'id' ) );
+		return self::check_owner( (int) $request->get_param( 'id' ), 'edit_post' );
 	}
 
 	/**
@@ -365,7 +371,7 @@ class BP_Tracker_REST_Controller extends WP_REST_Controller {
 	 * @return true|WP_Error
 	 */
 	public function update_item_permissions_check( $request ): bool|WP_Error {
-		return self::check_owner( (int) $request->get_param( 'id' ) );
+		return self::check_owner( (int) $request->get_param( 'id' ), 'edit_post' );
 	}
 
 	/**
@@ -375,18 +381,41 @@ class BP_Tracker_REST_Controller extends WP_REST_Controller {
 	 * @return true|WP_Error
 	 */
 	public function delete_item_permissions_check( $request ): bool|WP_Error {
-		return self::check_owner( (int) $request->get_param( 'id' ) );
+		return self::check_owner( (int) $request->get_param( 'id' ), 'delete_post' );
 	}
 
 	/**
-	 * Shared ownership check for the single-item routes.
+	 * Requires a logged-in user holding the base reading capability.
 	 *
-	 * @param int $post_id Reading ID being accessed.
+	 * Being logged in is not enough: pending accounts (and any other role
+	 * without the capability, e.g. a subscriber logged in with a cookie)
+	 * must not touch readings.
+	 *
 	 * @return true|WP_Error
 	 */
-	private static function check_owner( int $post_id ): bool|WP_Error {
+	private static function check_access(): bool|WP_Error {
 		if ( ! is_user_logged_in() ) {
 			return self::login_required_error();
+		}
+
+		return current_user_can( 'edit_bp_readings' ) ? true : self::forbidden_error();
+	}
+
+	/**
+	 * Shared check for the single-item routes: capability, then ownership.
+	 *
+	 * Ownership is checked explicitly on top of the meta capability, so not
+	 * even a role that can edit others' readings reaches them through the API.
+	 *
+	 * @param int    $post_id  Reading ID being accessed.
+	 * @param string $meta_cap Meta capability the operation needs (edit_post, delete_post).
+	 * @return true|WP_Error
+	 */
+	private static function check_owner( int $post_id, string $meta_cap ): bool|WP_Error {
+		$access = self::check_access();
+
+		if ( true !== $access ) {
+			return $access;
 		}
 
 		$post = get_post( $post_id );
@@ -403,7 +432,7 @@ class BP_Tracker_REST_Controller extends WP_REST_Controller {
 			);
 		}
 
-		return true;
+		return current_user_can( $meta_cap, $post->ID ) ? true : self::forbidden_error();
 	}
 
 	/**
@@ -597,6 +626,19 @@ class BP_Tracker_REST_Controller extends WP_REST_Controller {
 			'bp_tracker_rest_forbidden',
 			__( 'You must be logged in to view readings.', 'bp-tracker' ),
 			array( 'status' => 401 )
+		);
+	}
+
+	/**
+	 * Builds the error for a user whose role doesn't allow the operation.
+	 *
+	 * @return WP_Error
+	 */
+	private static function forbidden_error(): WP_Error {
+		return new WP_Error(
+			'bp_tracker_rest_forbidden',
+			__( 'Your account is not allowed to manage readings.', 'bp-tracker' ),
+			array( 'status' => 403 )
 		);
 	}
 

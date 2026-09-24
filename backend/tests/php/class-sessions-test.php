@@ -43,12 +43,14 @@ class BP_Tracker_Sessions_Test extends WP_UnitTestCase {
 			array(
 				'user_login' => 'alice',
 				'user_pass'  => $this->password,
+				'role'       => BP_Tracker_Roles::USER,
 			)
 		);
 		$this->other_id = self::factory()->user->create(
 			array(
 				'user_login' => 'bob',
 				'user_pass'  => $this->password,
+				'role'       => BP_Tracker_Roles::USER,
 			)
 		);
 	}
