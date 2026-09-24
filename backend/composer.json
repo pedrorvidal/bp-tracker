@@ -20,11 +20,15 @@
 		"lint": "phpcs",
 		"lint:fix": "phpcbf",
 		"analyse": "phpstan analyse",
-		"test": "phpunit"
+		"test": "phpunit",
+		"security-check": "composer audit --locked --abandoned=report --ignore-severity=low --ignore-severity=medium"
 	},
 	"config": {
 		"allow-plugins": {
 			"dealerdirect/phpcodesniffer-composer-installer": true
 		}
+	},
+	"scripts-descriptions": {
+		"security-check": "Fails on known high/critical vulnerabilities in composer.lock (low/medium and abandoned packages are only reported)."
 	}
 }

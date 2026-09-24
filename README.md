@@ -46,12 +46,13 @@ Every change must pass these checks locally before it is merged. CI runs the sam
 
 ### Backend (`backend/`)
 
-| Command                 | What it runs                                                 |
-| ----------------------- | ------------------------------------------------------------ |
-| `composer run lint`     | phpcs with WordPress Coding Standards (`phpcs.xml.dist`)     |
-| `composer run lint:fix` | phpcbf, which auto-fixes what phpcs can                      |
-| `composer run analyse`  | PHPStan level 6 with `szepeviktor/phpstan-wordpress`         |
-| `composer run test`     | PHPUnit / WP-Unit; must run inside the wp-env test container |
+| Command                       | What it runs                                                                                                                |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `composer run lint`           | phpcs with WordPress Coding Standards (`phpcs.xml.dist`)                                                                    |
+| `composer run lint:fix`       | phpcbf, which auto-fixes what phpcs can                                                                                     |
+| `composer run analyse`        | PHPStan level 6 with `szepeviktor/phpstan-wordpress`                                                                        |
+| `composer run test`           | PHPUnit / WP-Unit; must run inside the wp-env test container                                                                |
+| `composer run security-check` | `composer audit` on `composer.lock`: fails on high/critical advisories; low/medium and abandoned packages are only reported |
 
 The tests need the WordPress test library and database from `wp-env`, so run them through the `tests-cli` container:
 
@@ -61,24 +62,31 @@ npx wp-env run tests-cli --env-cwd=wp-content/plugins/bp-tracker composer run te
 
 ### Frontend (`frontend/`)
 
-| Command                | What it runs                                                                        |
-| ---------------------- | ----------------------------------------------------------------------------------- |
-| `npm run lint`         | ESLint (type-aware typescript-eslint, React hooks, jsx-a11y), zero warnings allowed |
-| `npm run typecheck`    | `tsc --noEmit` (strict mode)                                                        |
-| `npm run format:check` | Prettier, without writing (`npm run format` fixes)                                  |
-| `npm run test`         | Vitest + Testing Library (jsdom)                                                    |
-| `npm run build`        | Production build into `frontend/dist/`                                              |
+| Command                  | What it runs                                                                        |
+| ------------------------ | ----------------------------------------------------------------------------------- |
+| `npm run lint`           | ESLint (type-aware typescript-eslint, React hooks, jsx-a11y), zero warnings allowed |
+| `npm run typecheck`      | `tsc --noEmit` (strict mode)                                                        |
+| `npm run format:check`   | Prettier, without writing (`npm run format` fixes)                                  |
+| `npm run test`           | Vitest + Testing Library (jsdom)                                                    |
+| `npm run build`          | Production build into `frontend/dist/`                                              |
+| `npm run security-check` | `npm audit --audit-level=high`: fails on high/critical advisories                   |
 
 ## Continuous integration
 
 GitHub Actions runs on pushes to `main` and on pull requests. Each workflow only triggers when its part of the repository changes.
 
-| Workflow                                         | Triggers on changes to                                           | Steps                                                                       |
-| ------------------------------------------------ | ---------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| [`backend.yml`](.github/workflows/backend.yml)   | `backend/**`, `.wp-env.json`, root `package*.json`, the workflow | `composer install`, lint, analyse, then tests inside `wp-env` (`tests-cli`) |
-| [`frontend.yml`](.github/workflows/frontend.yml) | `frontend/**`, the workflow                                      | `npm ci`, lint, typecheck, format check, tests, build                       |
+| Workflow                                         | Triggers on changes to                                           | Steps                                                                                       |
+| ------------------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [`backend.yml`](.github/workflows/backend.yml)   | `backend/**`, `.wp-env.json`, root `package*.json`, the workflow | `composer install`, lint, analyse, security check, then tests inside `wp-env` (`tests-cli`) |
+| [`frontend.yml`](.github/workflows/frontend.yml) | `frontend/**`, the workflow                                      | `npm ci`, lint, typecheck, format check, security check, tests, build                       |
 
 Every check in a workflow runs even when an earlier one fails, so a single run reports all problems. Any failed check fails the job.
+
+### Dependency security
+
+- **Audit in CI:** both workflows run `security-check` and fail on a **high or critical** advisory for any locked dependency. Lower severities only show up in the log: they are mostly in dev tooling and would make the build fail over issues that don't reach production. The audit runs whenever a workflow runs, so an advisory published later surfaces on the next change to that part of the repository, or in a Dependabot pull request.
+- **Dependabot** ([`.github/dependabot.yml`](.github/dependabot.yml)) checks `backend/` (Composer) and `frontend/` (npm) every Monday. Minor and patch updates arrive grouped in one pull request per ecosystem; each major update gets its own. Commits use the `chore(deps)` / `chore(deps-dev)` prefix. Each pull request runs the matching workflow, including the audit, so a green check means it is safe to merge.
+- **Alerts and security updates** (pull requests opened as soon as an advisory is published, outside the weekly schedule) are repository settings, not part of this file. Both **Dependabot alerts** and **Dependabot security updates** are enabled under _Settings → Code security_.
 
 ## Configuration
 

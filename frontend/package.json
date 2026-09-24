@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "security-check": "npm audit --audit-level=high"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.103.2",

@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   checks:
-    name: Lint, type check, format, tests and build
+    name: Lint, type check, format, security check, tests and build
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -56,6 +56,11 @@ jobs:
       - name: Format check (Prettier)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run format:check
+
+      # Fails on high/critical advisories for anything in package-lock.json.
+      - name: Security check (npm audit)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run security-check
 
       - name: Tests (Vitest)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
