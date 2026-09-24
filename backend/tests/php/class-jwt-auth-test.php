@@ -354,7 +354,8 @@ class BP_Tracker_JWT_Auth_Test extends WP_UnitTestCase {
 		add_filter(
 			'query',
 			static function ( string $query ) use ( $table, &$raced ): string {
-				if ( ! $raced && str_starts_with( $query, "UPDATE {$table} SET used_at" ) ) {
+				// prepare()'s %i quotes the table name with backticks.
+				if ( ! $raced && str_starts_with( $query, "UPDATE `{$table}` SET used_at" ) ) {
 					$raced = true;
 					// The concurrent request wins the race and consumes the token.
 					// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery -- test-only simulation on our own table.

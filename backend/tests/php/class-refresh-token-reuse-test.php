@@ -125,8 +125,7 @@ class BP_Tracker_Refresh_Token_Reuse_Test extends WP_UnitTestCase {
 
 		$table = BP_Tracker_JWT_Auth::table_name();
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table is our own prefixed table name.
-		$row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE token_hash = %s", hash( 'sha256', $token ) ) );
+		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM %i WHERE token_hash = %s', $table, hash( 'sha256', $token ) ) );
 
 		return is_object( $row ) ? $row : null;
 	}

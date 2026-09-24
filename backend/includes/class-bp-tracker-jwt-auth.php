@@ -123,8 +123,7 @@ class BP_Tracker_JWT_Auth {
 
 		$table = self::table_name();
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.SchemaChange -- $table is our own prefixed table name; one-off data migration, not a schema change.
-		$wpdb->query( "UPDATE {$table} SET family_id = MD5( CONCAT( id, '-', token_hash ) ) WHERE family_id = ''" );
+		$wpdb->query( $wpdb->prepare( "UPDATE %i SET family_id = MD5( CONCAT( id, '-', token_hash ) ) WHERE family_id = ''", $table ) );
 	}
 
 	/**
@@ -301,8 +300,7 @@ class BP_Tracker_JWT_Auth {
 		global $wpdb;
 		$table = self::table_name();
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table is our own prefixed table name, never user input; wpdb::prepare() cannot placeholder identifiers.
-		$consumed = $wpdb->query( $wpdb->prepare( "UPDATE {$table} SET used_at = %s WHERE id = %d AND used_at IS NULL", gmdate( 'Y-m-d H:i:s' ), $row->id ) );
+		$consumed = $wpdb->query( $wpdb->prepare( 'UPDATE %i SET used_at = %s WHERE id = %d AND used_at IS NULL', $table, gmdate( 'Y-m-d H:i:s' ), $row->id ) );
 
 		if ( 1 !== $consumed ) {
 			self::revoke_reused_family( $row );
@@ -651,8 +649,7 @@ class BP_Tracker_JWT_Auth {
 
 		$table = self::table_name();
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table is our own prefixed table name, never user input; wpdb::prepare() cannot placeholder identifiers.
-		$row = $wpdb->get_row( $wpdb->prepare( "SELECT id, user_id, family_id, expires_at, used_at FROM {$table} WHERE token_hash = %s", self::hash_token( $token ) ) );
+		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT id, user_id, family_id, expires_at, used_at FROM %i WHERE token_hash = %s', $table, self::hash_token( $token ) ) );
 
 		return is_object( $row ) ? $row : null;
 	}

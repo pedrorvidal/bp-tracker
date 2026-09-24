@@ -123,8 +123,7 @@ class BP_Tracker_Sessions {
 
 		$table = BP_Tracker_JWT_Auth::table_name();
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table is our own prefixed table name, never user input; wpdb::prepare() cannot placeholder identifiers.
-		$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE expires_at < %s", gmdate( 'Y-m-d H:i:s' ) ) );
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE expires_at < %s', $table, gmdate( 'Y-m-d H:i:s' ) ) );
 	}
 
 	/**
