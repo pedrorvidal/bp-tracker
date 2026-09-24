@@ -202,3 +202,7 @@ In short:
 Details are in [`docs/api.md`](docs/api.md#roles-and-approval) and [`docs/architecture.md`](docs/architecture.md#user-roles-and-approval-flow).
 
 The frontend restores the session on page load from that cookie, refreshes automatically on a `401`, and sends signed-out users to `/login`. See [`frontend/README.md`](frontend/README.md#authentication) for the details, including the requirement that the frontend and the API share a site.
+
+## Development process
+
+This project is built with the help of [Claude Code](https://claude.com/claude-code), used for implementation, tests and documentation under the maintainer's review.
